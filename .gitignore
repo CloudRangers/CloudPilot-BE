@@ -33,5 +33,106 @@ out/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ###
-.vscode/
+### OS / 편집기 잡파일 ###
+.DS_Store
+**/.DS_Store
+Icon?
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*.orig
+*~
+*.bak
+
+### Java / JVM 런타임 ###
+*.class
+*.log
+logs/
+*.pid
+*.hprof
+*.jfr
+hs_err_pid*
+replay_pid*
+*.stackdump
+
+### Spring Boot 로컬 설정/시크릿 ###
+.env
+.env.*
+!.env.example
+.envrc
+# 로컬 yml은 커밋 금지, 기본 application.yml은 유지
+src/main/resources/application-local.yml
+src/main/resources/application-*.yml
+!src/main/resources/application.yml
+!src/main/resources/application-example.yml
+
+### 로컬 DB/런타임 데이터 ###
+mysql/
+mysql/**/data/
+postgres-data/
+**/tmp/
+tmp/
+
+### Docker ###
+.docker/
+docker-compose.override.yml
+**/*.pid
+
+### 테스트/커버리지 산출물 ###
+test-results/
+.jacoco/
+jacoco.exec
+coverage/
+*.lcov
+
+### 프론트엔드(있을 경우) ###
+node_modules/
+dist/
+.build/
+.npm/
+.pnpm-store/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+### Terraform(있을 경우) ###
+.terraform/
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+terraform.tfvars
+*.auto.tfvars
+# 잠금 파일은 보통 커밋 유지 권장
+# !.terraform.lock.hcl
+
+### Kubernetes(있을 경우) ###
+.kube/
+kubeconfig
+*.kubeconfig
+
+### 인증서/키/시크릿 파일 ###
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.crt
+*.key
+id_rsa
+id_rsa.*
+*.pub
+secrets/
+**/*secret*
+**/*secrets*

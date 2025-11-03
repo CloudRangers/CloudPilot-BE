@@ -30,9 +30,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
-	compileOnly 'org.projectlombok:lombok'
+	implementation 'com.mysql:mysql-connector-j'
+	runtimeOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	runtimeOnly 'org.postgresql:postgresql'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.security:spring-security-test'
@@ -41,4 +41,32 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+def loadDotenv() {
+	def f = file('.env'); if (!f.exists()) return [:]
+	def m = [:]
+	f.eachLine { raw ->
+		def line = raw.trim()
+		if (!line || line.startsWith('#')) return
+		def i = line.indexOf('=')
+		if (i <= 0) return
+		m[line.substring(0,i).trim()] = line.substring(i+1).trim()
+	}
+	m
+}
+
+tasks.named('bootRun') {
+	def envs = loadDotenv()
+	if (!envs.isEmpty()) environment envs
+	environment 'SPRING_PROFILES_ACTIVE',
+			System.getenv('SPRING_PROFILES_ACTIVE') ?: envs['SPRING_PROFILES_ACTIVE'] ?: 'local'
+}
+
+tasks.withType(Test) {
+	useJUnitPlatform()
+	def envs = loadDotenv()
+	if (!envs.isEmpty()) environment envs
+	environment 'SPRING_PROFILES_ACTIVE',
+			System.getenv('SPRING_PROFILES_ACTIVE') ?: envs['SPRING_PROFILES_ACTIVE'] ?: 'test'
 }
