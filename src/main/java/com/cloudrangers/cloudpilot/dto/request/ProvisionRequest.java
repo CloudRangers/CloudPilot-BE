@@ -19,7 +19,7 @@ public class ProvisionRequest {
     private ProviderType providerType;
 
     // DDL에 zone 개념이 있으므로 선택값으로 받음(없으면 팀 기본존 사용)
-    private Short zoneId;
+    private Integer zoneId;
 
     @NotNull(message = "VM 수량은 필수입니다")
     @Min(value = 1, message = "최소 1개 이상의 VM을 생성해야 합니다")
