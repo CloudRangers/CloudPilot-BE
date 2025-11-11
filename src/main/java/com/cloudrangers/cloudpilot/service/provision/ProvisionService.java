@@ -1,24 +1,22 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
-import com.cloudrangers.cloudpilot.domain.provision.ProvisionJob;
+import com.cloudrangers.cloudpilot.domain.provision.VmProvisionJob;
+import com.cloudrangers.cloudpilot.enums.ProviderType;
+import com.cloudrangers.cloudpilot.enums.VmProvisionStatus;
+import com.cloudrangers.cloudpilot.dto.message.ProvisionJobMessage;
 import com.cloudrangers.cloudpilot.dto.request.ProvisionRequest;
 import com.cloudrangers.cloudpilot.dto.response.ProvisionResponse;
-import com.cloudrangers.cloudpilot.enums.ProvisionStatus;
 import com.cloudrangers.cloudpilot.exception.ProvisionException;
 import com.cloudrangers.cloudpilot.repository.provision.ProvisionJobRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.*;
-import java.util.stream.Collectors;
 
-/**
- * 프로비저닝 Job 관리 서비스 (API 서버용)
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -28,55 +26,51 @@ public class ProvisionService {
     private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
-    /**
-     * 프로비저닝 Job 생성 및 큐에 푸시
-     */
     @Transactional
     public ProvisionResponse createProvisionJob(ProvisionRequest request, Long userId, Long teamId) {
-
-        log.info("Creating provision job for user={}, team={}, provider={}",
-                userId, teamId, request.getProviderType());
+        log.info("Creating provision job for user={}, team={}, provider={}, zone={}",
+                userId, teamId, request.getProviderType(), request.getZoneId());
 
         try {
-            // 1) Job ID 생성
-            String jobId = UUID.randomUUID().toString();
-
-            // 2) Terraform 설정(JSON) 저장용
-            String terraformConfig = generateTerraformConfig(request);
-
-            // 3) DB 저장
-            ProvisionJob job = ProvisionJob.builder()
-                    .jobId(jobId)
+            // 1) DB 저장 (DDL 필드만)
+            VmProvisionJob job = VmProvisionJob.builder()
                     .catalogId(request.getCatalogId())
-                    .userId(userId)
                     .teamId(teamId)
-                    .providerType(request.getProviderType())
-                    .status(ProvisionStatus.QUEUED)
-                    .terraformConfig(terraformConfig)
+                    .userId(userId)
+                    .createdBy(userId)
+                    .zoneId(request.getZoneId())
+                    .status(VmProvisionStatus.queued)
                     .retryCount(0)
+                    .maxRetries(3)
+                    .purpose(request.getPurpose()) // ProvisionRequest에 purpose 있으면 매핑, 없으면 null
+                    .createdAt(Instant.now())
+                    .updatedBy(userId)
                     .build();
 
-            ProvisionJob savedJob = provisionJobRepository.save(job);
-            log.info("Job saved to database: {}", savedJob.getJobId());
+            VmProvisionJob saved = provisionJobRepository.save(job);
 
-            // 4) Provider 자격증명
-            Map<String, String> credentials = getProviderCredentials(request.getProviderType(), teamId);
+            // 2) 자격증명 (온프레미스 vsphere 기본)
+            Map<String, String> credentials = getVsphereCredentials();
 
-            // 5) 큐 메시지(payload) 구성
-            Map<String, Object> messagePayload = new HashMap<>();
-            messagePayload.put("jobId", jobId);
-            messagePayload.put("userId", userId);
-            messagePayload.put("teamId", teamId);
-            messagePayload.put("credentials", credentials);
-            messagePayload.put("request", request);
+            // 3) 메시지 구성 (상관관계 ID = DB PK 문자열)
+            ProvisionJobMessage message = ProvisionJobMessage.builder()
+                    .jobId(String.valueOf(saved.getId()))
+                    .userId(userId)
+                    .teamId(teamId)
+                    .zoneId(request.getZoneId())
+                    .providerType(request.getProviderType() != null
+                            ? request.getProviderType()
+                            : enumVsphereFallback())  // 간단하고 명확함
+                    .credentials(credentials)
+                    .request(request)
+                    .action("apply")
+                    .build();
 
-            // 6) JSON 직렬화 후 큐 발행
-            String jobJson = objectMapper.writeValueAsString(messagePayload);
-            jobQueueService.pushJob(jobJson);
+            // 4) 큐 발행
+            jobQueueService.pushJob(message, false);
 
-            log.info("Provision job pushed to RabbitMQ: {}", jobId);
-
-            return mapToResponse(savedJob);
+            log.info("Provision job pushed. jobId={}", saved.getId());
+            return mapToResponse(saved);
 
         } catch (Exception e) {
             log.error("Failed to create provision job", e);
@@ -84,126 +78,118 @@ public class ProvisionService {
         }
     }
 
-    /**
-     * Job 상태 조회
-     */
     @Transactional(readOnly = true)
-    public ProvisionResponse getJobStatus(String jobId) {
-        ProvisionJob job = provisionJobRepository.findByJobId(jobId)
-                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobId));
+    public ProvisionResponse getJobStatus(String jobIdStr) {
+        Long jobId = parseId(jobIdStr);
+        VmProvisionJob job = provisionJobRepository.findById(jobId)
+                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobIdStr));
         return mapToResponse(job);
     }
 
-    /**
-     * 팀별 Job 목록 조회
-     */
     @Transactional(readOnly = true)
     public List<ProvisionResponse> getTeamJobs(Long teamId) {
         return provisionJobRepository.findByTeamId(teamId).stream()
                 .map(this::mapToResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
-    /**
-     * Job 재시도 (다시 큐에 푸시)
-     */
     @Transactional
-    public void retryJob(String jobId) {
-        ProvisionJob job = provisionJobRepository.findByJobId(jobId)
-                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobId));
+    public void retryJob(String jobIdStr) {
+        Long jobId = parseId(jobIdStr);
+        VmProvisionJob job = provisionJobRepository.findById(jobId)
+                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobIdStr));
 
-        if (!job.canRetry()) {
+        if (job.getRetryCount() != null && job.getMaxRetries() != null
+                && job.getRetryCount() >= job.getMaxRetries()) {
             throw new ProvisionException("최대 재시도 횟수를 초과했습니다");
         }
 
         try {
-            // 기존 저장된 terraformConfig(JSON)에서 ProvisionRequest 복원
-            ProvisionRequest request = objectMapper.readValue(job.getTerraformConfig(), ProvisionRequest.class);
+            // 기존 요청은 별도 저장 X → 워커 입력은 최근 API 요청 본문을 사용하도록 설계
+            // 필요하면 job_id 기준 별도 테이블에 Request 스냅샷 보관하도록 확장 가능
+            Map<String, String> credentials = getVsphereCredentials();
 
-            // 최신 자격증명 재조회 (회전/갱신 고려)
-            Map<String, String> credentials = getProviderCredentials(job.getProviderType(), job.getTeamId());
+            ProvisionJobMessage message = ProvisionJobMessage.builder()
+                    .jobId(String.valueOf(job.getId()))
+                    .userId(job.getCreatedBy())
+                    .teamId(job.getTeamId())
+                    .zoneId(job.getZoneId())
+                    .providerType(enumVsphereFallback())
+                    .credentials(credentials)
+                    .request(null) // 이전 요청 스냅샷 보관 안 하면 null (워커에서 처리 방식에 맞게 조정)
+                    .action("apply")
+                    .build();
 
-            Map<String, Object> messagePayload = new HashMap<>();
-            messagePayload.put("jobId", job.getJobId());     // 동일 Job ID로 재시도
-            messagePayload.put("userId", job.getUserId());
-            messagePayload.put("teamId", job.getTeamId());
-            messagePayload.put("credentials", credentials);
-            messagePayload.put("request", request);
+            // 상태/카운터 갱신
+            job.setRetryCount(Optional.ofNullable(job.getRetryCount()).orElse(0) + 1);
+            job.setStatus(VmProvisionStatus.queued);
+            job.setStartedAt(null);
+            job.setFinishedAt(null);
+            job.setErrorMessage(null);
 
-            String jobJson = objectMapper.writeValueAsString(messagePayload);
-
-            // 상태/재시도 카운트 갱신 후 재발행
-            job.incrementRetryCount();
-            job.updateStatus(ProvisionStatus.QUEUED);
             provisionJobRepository.save(job);
+            jobQueueService.pushJob(message, true); // 재시도: 우선순위↑
 
-            jobQueueService.pushJob(jobJson);
-
-            log.info("Job retry pushed: jobId={}, retryCount={}", job.getJobId(), job.getRetryCount());
+            log.info("Job retry pushed: jobId={}, retryCount={}", job.getId(), job.getRetryCount());
         } catch (Exception e) {
-            log.error("Failed to retry job: {}", job.getJobId(), e);
+            log.error("Failed to retry job: {}", job.getId(), e);
             throw new ProvisionException("Job 재시도 실패: " + e.getMessage());
         }
     }
 
-    /**
-     * Terraform 설정 생성(JSON)
-     */
-    private String generateTerraformConfig(ProvisionRequest request) {
+    // ===== helpers =====
+
+    private Long parseId(String idStr) {
         try {
-            return objectMapper.writeValueAsString(request);
-        } catch (Exception e) {
-            throw new ProvisionException("Terraform 설정 생성 실패: " + e.getMessage());
+            return Long.parseLong(idStr);
+        } catch (NumberFormatException nfe) {
+            throw new ProvisionException("잘못된 jobId 형식입니다 (숫자여야 함): " + idStr);
         }
     }
 
-    /**
-     * Provider 자격증명 가져오기
-     * TODO: CredentialService에서 안전하게 가져와야 함
-     */
-    private Map<String, String> getProviderCredentials(
-            com.cloudrangers.cloudpilot.enums.ProviderType providerType,
-            Long teamId) {
-
+    // 온프레미스 vSphere 고정 자격증명 (Vault/Zone 연계로 대체 가능)
+    private Map<String, String> getVsphereCredentials() {
         Map<String, String> credentials = new HashMap<>();
-
-        switch (providerType) {
-            case AWS:
-                credentials.put("region", System.getenv("AWS_REGION"));
-                credentials.put("access_key", System.getenv("AWS_ACCESS_KEY_ID"));
-                credentials.put("secret_key", System.getenv("AWS_SECRET_ACCESS_KEY"));
-                break;
-            case VSPHERE:
-                credentials.put("server", System.getenv("VSPHERE_SERVER"));
-                credentials.put("username", System.getenv("VSPHERE_USERNAME"));
-                credentials.put("password", System.getenv("VSPHERE_PASSWORD"));
-                break;
-            default:
-                throw new IllegalArgumentException("Unsupported provider: " + providerType);
-        }
-
+        credentials.put("server", System.getenv("VSPHERE_SERVER"));
+        credentials.put("username", System.getenv("VSPHERE_USERNAME"));
+        credentials.put("password", System.getenv("VSPHERE_PASSWORD"));
         return credentials;
     }
 
-    /**
-     * Entity → Response DTO 변환
-     */
-    private ProvisionResponse mapToResponse(ProvisionJob job) {
+    // providerType 비었을 때 VSPHERE로 대체 (DTO enum이 있음을 가정)
+    private ProviderType enumVsphereFallback() {
+        return com.cloudrangers.cloudpilot.enums.ProviderType.VSPHERE;
+    }
+
+    private ProvisionResponse mapToResponse(VmProvisionJob job) {
+        // 기존 ProvisionResponse 스키마가 남아있다고 가정: 없는 값은 null로
         return ProvisionResponse.builder()
                 .id(job.getId())
-                .jobId(job.getJobId())
                 .catalogId(job.getCatalogId())
-                .userId(job.getUserId())
+                .jobId(String.valueOf(job.getId()))
+                .catalogId(null)                 // DDL에 없음
+                .userId(job.getCreatedBy())
                 .teamId(job.getTeamId())
-                .providerType(job.getProviderType())
-                .status(job.getStatus())
-                .vmResourceId(job.getVmResourceId())
+                .providerType(null)              // DDL에 없음(온프레미스 고정이면 클라이언트에서 vsphere로 처리)
+                .status(mapStatus(job.getStatus()))
+                .vmResourceId(null)              // DDL에 없음 (필요 시 별도 엔티티에서 조회)
                 .errorMessage(job.getErrorMessage())
                 .retryCount(job.getRetryCount())
                 .startedAt(job.getStartedAt())
-                .completedAt(job.getCompletedAt())
+                .completedAt(job.getFinishedAt())
                 .createdAt(job.getCreatedAt())
-                .updatedAt(job.getUpdatedAt())
+                .updatedAt(job.getFinishedAt() != null ? job.getFinishedAt() : job.getCreatedAt())
                 .build();
+    }
+
+    // 기존 응답 DTO의 상태(enum)가 RUNNING/SUCCEEDED/FAILED/QUEUED 라면 매핑
+    private VmProvisionStatus mapStatus(VmProvisionStatus s) {
+        if (s == null) return null;
+        return switch (s) {
+            case queued -> VmProvisionStatus.queued;
+            case running -> VmProvisionStatus.running;
+            case succeeded -> VmProvisionStatus.succeeded;
+            case failed, canceled -> VmProvisionStatus.failed;
+        };
     }
 }

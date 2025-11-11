@@ -1,14 +1,14 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
+import com.cloudrangers.cloudpilot.dto.message.ProvisionJobMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import java.util.Locale;
+import java.util.Optional;
 
-/**
- * Job을 RabbitMQ에 발행하는 서비스 (JSON 문자열 전송)
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -19,48 +19,48 @@ public class JobQueueService {
     @Value("${rabbitmq.exchange.provision.name:provision-exchange}")
     private String exchangeName;
 
-    @Value("${rabbitmq.routing-key.provision:provision.create}")
-    private String routingKey;
+    // 예: provision.create.[provider]
+    @Value("${rabbitmq.routing-key.provision.base:provision.create}")
+    private String baseRoutingKey;
 
-    /**
-     * 일반 우선순위 Job 발행 (JSON 문자열)
-     */
-    public void pushJob(String jobJson) {
+    public void pushJob(ProvisionJobMessage msg, boolean highPriority) {
+        final String routingKey = buildRoutingKey(msg);
         try {
-            log.info("Publishing job to RabbitMQ (bytes={}): exchange={}, routingKey={}",
-                    jobJson.length(), exchangeName, routingKey);
-
-            rabbitTemplate.convertAndSend(exchangeName, routingKey, jobJson);
-
-            log.info("Job successfully published.");
-        } catch (Exception e) {
-            log.error("Failed to publish job to RabbitMQ", e);
-            throw new RuntimeException("Failed to publish job to queue", e);
-        }
-    }
-
-    /**
-     * 우선순위가 높은 Job 발행 (JSON 문자열)
-     */
-    public void pushHighPriorityJob(String jobJson) {
-        try {
-            log.info("Publishing HIGH priority job to RabbitMQ: exchange={}, routingKey={}",
-                    exchangeName, routingKey);
+            log.info(String.format(
+                    "Publishing job: jobId=%s, exchange=%s, rk=%s, provider=%s, zone=%s",
+                    safeToString(msg.getJobId()), safeToString(exchangeName), routingKey,
+                    safeToString(msg.getProviderType()), safeToString(msg.getZoneId())
+            ));
 
             rabbitTemplate.convertAndSend(
                     exchangeName,
                     routingKey,
-                    jobJson,
+                    msg,
                     message -> {
-                        message.getMessageProperties().setPriority(10); // 우선순위 설정
+                        // 상관관계 식별자 세팅(= DB PK를 문자열로)
+                        message.getMessageProperties().setCorrelationId(msg.getJobId());
+                        message.getMessageProperties().setHeader("jobId", msg.getJobId());
+                        // 우선순위 큐 사용 시
+                        message.getMessageProperties().setPriority(highPriority ? 9 : 0);
                         return message;
                     }
             );
-
-            log.info("High priority job successfully published.");
         } catch (Exception e) {
-            log.error("Failed to publish high priority job", e);
+            log.error("Failed to publish job to RabbitMQ. jobId={}", msg.getJobId(), e);
             throw new RuntimeException("Failed to publish job to queue", e);
         }
+    }
+
+    private String buildRoutingKey(ProvisionJobMessage msg) {
+        // 온프레미스 기본값은 vsphere
+        final String provider = Optional.ofNullable(msg.getProviderType())
+                .map(Object::toString)
+                .map(s -> s.toLowerCase(Locale.ROOT))
+                .orElse("vsphere");
+        return baseRoutingKey + "." + provider;
+    }
+
+    private static String safeToString(Object o) {
+        return (o == null) ? "null" : o.toString();
     }
 }
