@@ -8,13 +8,16 @@ import com.cloudrangers.cloudpilot.exception.badrequest.InvalidTokenException;
 import com.cloudrangers.cloudpilot.exception.notfound.UserNotFoundException;
 import com.cloudrangers.cloudpilot.repository.user.UserRepository;
 import com.cloudrangers.cloudpilot.security.JwtProvider;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.lang.NonNull;
 import org.springframework.data.redis.core.RedisTemplate;
+import jakarta.servlet.http.Cookie;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,57 +36,98 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
-        // ✅ 1. 사용자 + 역할 + 팀 정보 조회
+
         User user = userRepository.findWithRolesByEmpno(request.getEmpno())
                 .orElseThrow(() -> new UserNotFoundException(request.getEmpno()));
 
-        // ✅ 2. 비밀번호 검증
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new InvalidPasswordException();
         }
 
-        // ✅ 3. 역할 및 팀 추출 (단일 역할 기준)
-        var userRole = user.getUserRoles().stream().findFirst()
+        var userRole = user.getUserRoles().stream()
+                .max((a, b) -> a.getRole().getPermissionLevel() - b.getRole().getPermissionLevel())
                 .orElseThrow(() -> new RuntimeException("역할 정보가 없습니다."));
-        String roleCode = userRole.getRole().getCode();
-        String teamName = userRole.getTeam() != null ? userRole.getTeam().getName() : "GLOBAL";
+
+        var role = userRole.getRole();
+        var team = userRole.getTeam();
+
+        String roleCode = role.getCode();
+        String roleName = role.getName();
+        String scope    = (String) role.getPermissions().get("scope");
+
+        Long teamId = (team != null) ? team.getId() : null;
+        String teamName = (team != null) ? team.getName() : "GLOBAL";
+
         String username = user.getUsername();
 
+        // ❗ claims 생성 (null 제거)
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("role", roleCode);
+        claims.put("teamId", teamId);
+        claims.put("team", teamName);
+        if (scope != null) claims.put("scope", scope);
 
-        // ✅ 4. JWT 생성 (empno + role + team)
-        String accessToken = jwtProvider.generateTokenWithClaims(
+        // access token 생성
+        String accessToken = jwtProvider.generateAccessToken(
                 String.valueOf(user.getEmpno()),
-                Map.of(
-                        "role", roleCode,
-                        "team", teamName
-                )
+                claims
         );
 
-        // ✅ 5. 로그인 응답 반환
-        return new LoginResponse(accessToken, roleCode, teamName, username);
+        String refreshToken = jwtProvider.generateRefreshToken(
+                String.valueOf(user.getEmpno())
+        );
+
+        return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .username(username)
+                .roleCode(roleCode)
+                .roleName(roleName)
+                .teamId(teamId)
+                .teamName(teamName)
+                .build();
+
     }
 
     /** ✅ Redis 기반 로그아웃 */
     @Override
-    public void logout(String token) {
-        if (token == null || !token.startsWith("Bearer ")) {
-            throw new InvalidTokenException("Authorization 헤더가 유효하지 않습니다.");
+    public void logout( HttpServletRequest request) {
+
+        // 1) 쿠키에서 access_token 읽기
+        String token = extractTokenFromCookies(request);
+
+        if (token == null) {
+            throw new InvalidTokenException("로그아웃할 access_token 쿠키가 없습니다.");
         }
 
-        String pureToken = token.substring(7);
-
-        // JWT 검증
-        if (!jwtProvider.validateToken(pureToken)) {
+        // 2) JWT 검증
+        if (!jwtProvider.validateToken(token)) {
             throw new InvalidTokenException("유효하지 않은 토큰입니다.");
         }
 
-        // 토큰 만료까지 남은 시간 계산
-        long expiration = jwtProvider.getRemainingExpiration(pureToken);
+        // 3) 남은 만료시간 계산
+        long expiration = jwtProvider.getRemainingExpiration(token);
 
-        // ✅ Redis에 블랙리스트 등록 (key = BLACKLIST:<token>)
+        // 4) 블랙리스트 등록
         redisTemplate.opsForValue()
-                .set("BLACKLIST:" + pureToken, "logout", expiration, TimeUnit.MILLISECONDS);
+                .set("BLACKLIST:" + token, "logout", expiration, TimeUnit.MILLISECONDS);
+
+        log.info("🚫 로그아웃: 블랙리스트 등록완료 token={}", token);
     }
+
+    // Helper: 쿠키에서 access_token 추출
+    private String extractTokenFromCookies(HttpServletRequest request) {
+
+        if (request.getCookies() == null) return null;
+
+        for (Cookie cookie : request.getCookies()) {
+            if (cookie.getName().equals("access_token")) {
+                return cookie.getValue();
+            }
+        }
+        return null;
+    }
+
 
 
     @Override
@@ -152,5 +196,27 @@ public class UserServiceImpl implements UserService {
     @Override
     public void updateEmail(Long userId, String newEmail) {
         // TODO: 이메일 변경 로직
+    }
+
+    @Override
+    public Map<String, Object> buildClaims(String empno) {
+
+        User user = userRepository.findWithRolesByEmpno(Long.valueOf(empno))
+                .orElseThrow(() -> new UserNotFoundException(empno));
+
+        var userRole = user.getUserRoles().stream()
+                .max((a, b) -> a.getRole().getPermissionLevel() - b.getRole().getPermissionLevel())
+                .orElseThrow(() -> new RuntimeException("역할 정보가 없습니다."));
+
+        var role = userRole.getRole();
+        var team = userRole.getTeam();
+
+        Map<String, Object> claims = new HashMap<>();
+
+        claims.put("role", role.getCode());
+        claims.put("teamId", team != null ? team.getId() : null);
+        claims.put("team", team != null ? team.getName() : "GLOBAL");
+
+        return claims;
     }
 }
