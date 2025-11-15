@@ -32,12 +32,13 @@ public class ProvisionService {
                 userId, teamId, request.getProviderType(), request.getZoneId());
 
         try {
+            // 1) DB 저장: Integer → Short 캐스팅
             VmProvisionJob job = VmProvisionJob.builder()
                     .catalogId(request.getCatalogId())
                     .teamId(teamId)
-                    .userId(userId)
+                    .userId(userId)            // 엔티티에 있으면 유지
                     .createdBy(userId)
-                    .zoneId(toShort(request.getZoneId()))
+                    .zoneId(toShort(request.getZoneId()))   // ★ 여기서 Short로 저장
                     .status(VmProvisionStatus.queued)
                     .retryCount(0)
                     .maxRetries(3)
@@ -48,6 +49,7 @@ public class ProvisionService {
 
             VmProvisionJob saved = provisionJobRepository.save(job);
 
+            // 2) 워커로 보낼 메시지: Integer 유지
             ProvisionJobMessage message = ProvisionJobMessage.builder()
                     .jobId(String.valueOf(saved.getId()))
                     .userId(userId)
@@ -77,8 +79,6 @@ public class ProvisionService {
         }
     }
 
-
-
     // ===== helpers =====
     private ProviderType enumVsphereFallback() {
         return com.cloudrangers.cloudpilot.enums.ProviderType.VSPHERE;
@@ -88,7 +88,7 @@ public class ProvisionService {
         return ProvisionResponse.builder()
                 .id(job.getId())
                 .jobId(String.valueOf(job.getId()))
-                .catalogId(job.getCatalogId())
+                .catalogId(job.getCatalogId())           // ✅ 중복/널 오버라이드 제거
                 .userId(job.getCreatedBy())
                 .teamId(job.getTeamId())
                 .status(mapStatus(job.getStatus()))

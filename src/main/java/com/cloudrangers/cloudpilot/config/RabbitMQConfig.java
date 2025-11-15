@@ -33,7 +33,7 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.provision.pattern:provision.#}")
     private String provisionRoutingPattern;
 
-    //
+    // ===== Result =====
     @Value("${rabbitmq.queue.result.name:provision-results}")
     private String resultQueueName;
 
