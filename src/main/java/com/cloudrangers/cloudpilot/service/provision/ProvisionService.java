@@ -32,13 +32,12 @@ public class ProvisionService {
                 userId, teamId, request.getProviderType(), request.getZoneId());
 
         try {
-            // 1) DB 저장: Integer → Short 캐스팅
             VmProvisionJob job = VmProvisionJob.builder()
                     .catalogId(request.getCatalogId())
                     .teamId(teamId)
-                    .userId(userId)            // 엔티티에 있으면 유지
+                    .userId(userId)
                     .createdBy(userId)
-                    .zoneId(toShort(request.getZoneId()))   // ★ 여기서 Short로 저장
+                    .zoneId(toShort(request.getZoneId()))
                     .status(VmProvisionStatus.queued)
                     .retryCount(0)
                     .maxRetries(3)
@@ -49,12 +48,11 @@ public class ProvisionService {
 
             VmProvisionJob saved = provisionJobRepository.save(job);
 
-            // 2) 워커로 보낼 메시지: Integer 유지
             ProvisionJobMessage message = ProvisionJobMessage.builder()
                     .jobId(String.valueOf(saved.getId()))
                     .userId(userId)
                     .teamId(teamId)
-                    .zoneId(request.getZoneId()) // ★ 메시지는 Integer
+                    .zoneId(request.getZoneId())
                     .providerType(request.getProviderType() != null
                             ? request.getProviderType()
                             : enumVsphereFallback())
@@ -79,61 +77,7 @@ public class ProvisionService {
         }
     }
 
-    @Transactional(readOnly = true)
-    public ProvisionResponse getJobStatus(String jobIdStr) {
-        Long jobId = parseId(jobIdStr);
-        VmProvisionJob job = provisionJobRepository.findById(jobId)
-                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobIdStr));
-        return mapToResponse(job);
-    }
 
-    @Transactional(readOnly = true)
-    public List<ProvisionResponse> getTeamJobs(Long teamId) {
-        return provisionJobRepository.findByTeamId(teamId).stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    @Transactional
-    public void retryJob(String jobIdStr) {
-        Long jobId = parseId(jobIdStr);
-        VmProvisionJob job = provisionJobRepository.findById(jobId)
-                .orElseThrow(() -> new ProvisionException("Job을 찾을 수 없습니다: " + jobIdStr));
-
-        if (job.getRetryCount() != null && job.getMaxRetries() != null
-                && job.getRetryCount() >= job.getMaxRetries()) {
-            throw new ProvisionException("최대 재시도 횟수를 초과했습니다");
-        }
-
-        try {
-            // ★ request 변수 없음 → job에서 꺼내고 Short→Integer로 변환
-            Integer zoneIdForMsg = (job.getZoneId() != null) ? Integer.valueOf(job.getZoneId()) : null;
-
-            ProvisionJobMessage message = ProvisionJobMessage.builder()
-                    .jobId(String.valueOf(job.getId()))
-                    .userId(job.getCreatedBy())
-                    .teamId(job.getTeamId())
-                    .zoneId(zoneIdForMsg)          // ★ 메시지는 Integer
-                    .providerType(enumVsphereFallback())
-                    .action("apply")
-                    .request(null) // 스냅샷 없으면 null
-                    .build();
-
-            job.setRetryCount(Optional.ofNullable(job.getRetryCount()).orElse(0) + 1);
-            job.setStatus(VmProvisionStatus.queued);
-            job.setStartedAt(null);
-            job.setFinishedAt(null);
-            job.setErrorMessage(null);
-
-            provisionJobRepository.save(job);
-            jobQueueService.pushJob(message, true);
-
-            log.info("Job retry pushed: jobId={}, retryCount={}", job.getId(), job.getRetryCount());
-        } catch (Exception e) {
-            log.error("Failed to retry job: {}", job.getId(), e);
-            throw new ProvisionException("Job 재시도 실패: " + e.getMessage());
-        }
-    }
 
     // ===== helpers =====
 
@@ -145,7 +89,6 @@ public class ProvisionService {
         }
     }
 
-    // (선택) vSphere ENV를 사용해야 할 경우 — 오타 수정: VSPHERE_USER
     @SuppressWarnings("unused")
     private Map<String, String> getVsphereCredentials() {
         Map<String, String> credentials = new HashMap<>();
@@ -163,7 +106,7 @@ public class ProvisionService {
         return ProvisionResponse.builder()
                 .id(job.getId())
                 .jobId(String.valueOf(job.getId()))
-                .catalogId(job.getCatalogId())           // ✅ 중복/널 오버라이드 제거
+                .catalogId(job.getCatalogId())
                 .userId(job.getCreatedBy())
                 .teamId(job.getTeamId())
                 .status(mapStatus(job.getStatus()))

@@ -33,7 +33,7 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.provision.pattern:provision.#}")
     private String provisionRoutingPattern;
 
-    // ===== Result =====
+    //
     @Value("${rabbitmq.queue.result.name:provision-results}")
     private String resultQueueName;
 
@@ -53,12 +53,12 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.dlq:provision.failed}")
     private String dlqRoutingKey;
 
-    /** JSON 메시지 변환기 */
+    // JSON 메세지 변환
     @Bean
     public MessageConverter jsonMessageConverter() {
         ObjectMapper objectMapper = new ObjectMapper();
 
-        // ✅ Enum 대소문자 구분 안 함
+        // Enum 대소문자 구분 X
         objectMapper.enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
 
         objectMapper.registerModule(new JavaTimeModule());
@@ -68,7 +68,6 @@ public class RabbitMQConfig {
         return new Jackson2JsonMessageConverter(objectMapper);
     }
 
-    /** RabbitTemplate */
     @Bean
     public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory,
                                          MessageConverter jsonMessageConverter) {
@@ -78,10 +77,9 @@ public class RabbitMQConfig {
     }
 
 
-    // ========= Job Queue/Exchange/Binding =========
+    // Job Queue/Exchange/Binding
     @Bean
     public Queue provisionQueue() {
-        // x-max-priority 추가 (우선순위 발행 사용 시 필수)
         return QueueBuilder.durable(provisionQueueName)
                 .withArgument("x-dead-letter-exchange", dlxName)
                 .withArgument("x-dead-letter-routing-key", dlqRoutingKey)
@@ -100,7 +98,7 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(provisionQueue).to(provisionExchange).with(provisionRoutingPattern);
     }
 
-    // ========= Result Queue/Exchange/Binding =========
+    // Result Queue/Exchange/Binding
     @Bean
     public Queue resultQueue() {
         return QueueBuilder.durable(resultQueueName).build();
@@ -118,7 +116,7 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(resultQueue).to(resultExchange).with(resultRoutingPattern);
     }
 
-    // ========= Dead Letter Exchange/Queue/Binding =========
+    // Dead Letter Exchange/Queue/Binding
     @Bean
     public TopicExchange deadLetterExchange() {
         return new TopicExchange(dlxName, true, false);
@@ -136,7 +134,7 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(dlqRoutingKey);
     }
 
-    /** Listener 컨테이너 */
+    // Listener 컨테이너
     @Bean
     public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
             ConnectionFactory connectionFactory,
