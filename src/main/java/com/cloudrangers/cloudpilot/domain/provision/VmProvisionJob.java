@@ -81,4 +81,9 @@ public class VmProvisionJob {
         if (jobUuid == null) jobUuid = java.util.UUID.randomUUID().toString();
         if (updatedBy == null) updatedBy = createdBy;
     }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
 }
