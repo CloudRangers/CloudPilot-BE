@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 
 @RestController
-@RequestMapping("/catalog/providers")
+@RequestMapping("/providers")
 @RequiredArgsConstructor
 public class ProviderController {
 

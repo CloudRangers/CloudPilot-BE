@@ -1,3 +1,12 @@
+# src/main/resources/application.yml
 spring:
-  profiles:
-    default: local
+  application:
+    name: cloudpilot
+
+# (선택) 로깅 정도
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.orm.jdbc.bind: trace
+
+# 절대 여기에는 datasource / h2 / jpa ddl-auto 같은 환경별 값 넣지 않기

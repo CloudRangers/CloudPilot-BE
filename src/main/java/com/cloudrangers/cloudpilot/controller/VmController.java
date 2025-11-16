@@ -78,7 +78,7 @@ public class VmController {
     ) {
         return ApiResponse.ok(vmDeleteService.enqueueDeletion(vmId, requestedBy));
     }
-    @DeleteMapping("/{vmId}")
+    @PostMapping("/{vmId}/delete-request")
     public ApiResponse<Void> requestDelete(@PathVariable Long vmId) {
         vmQueryService.requestDelete(vmId);
         return ApiResponse.ok(null);
