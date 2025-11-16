@@ -81,14 +81,6 @@ public class ProvisionService {
 
     // ===== helpers =====
 
-    private Long parseId(String idStr) {
-        try {
-            return Long.parseLong(idStr);
-        } catch (NumberFormatException nfe) {
-            throw new ProvisionException("잘못된 jobId 형식입니다 (숫자여야 함): " + idStr);
-        }
-    }
-
     @SuppressWarnings("unused")
     private Map<String, String> getVsphereCredentials() {
         Map<String, String> credentials = new HashMap<>();
