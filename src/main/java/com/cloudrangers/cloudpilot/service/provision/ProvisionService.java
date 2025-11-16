@@ -80,16 +80,6 @@ public class ProvisionService {
 
 
     // ===== helpers =====
-
-    @SuppressWarnings("unused")
-    private Map<String, String> getVsphereCredentials() {
-        Map<String, String> credentials = new HashMap<>();
-        credentials.put("server",   System.getenv("VSPHERE_SERVER"));
-        credentials.put("username", System.getenv("VSPHERE_USER"));      // <- USERNAME 아님
-        credentials.put("password", System.getenv("VSPHERE_PASSWORD"));
-        return credentials;
-    }
-
     private ProviderType enumVsphereFallback() {
         return com.cloudrangers.cloudpilot.enums.ProviderType.VSPHERE;
     }
