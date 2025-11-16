@@ -39,7 +39,7 @@ public class SecurityConfig {
     }
 
     @Bean
-                                                                                                            UserDetailsService userDetailsService(PasswordEncoder encoder) {
+    UserDetailsService userDetailsService(PasswordEncoder encoder) {
         return new InMemoryUserDetailsManager(
                 User.withUsername("cloudpilot")
                         .password(encoder.encode("cloudpilot123!")) // 임시 비밀번호
