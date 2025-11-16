@@ -53,7 +53,7 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.dlq:provision.failed}")
     private String dlqRoutingKey;
 
-    // JSON 메세지 변환
+    // JSON 메시지 변환
     @Bean
     public MessageConverter jsonMessageConverter() {
         ObjectMapper objectMapper = new ObjectMapper();
