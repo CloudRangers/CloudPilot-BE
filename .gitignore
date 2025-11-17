@@ -133,6 +133,12 @@ kubeconfig
 id_rsa
 id_rsa.*
 *.pub
+
 secrets/
-**/*secret*
-**/*secrets*
+
+*secret.yml
+*secret.yaml
+*secret.json
+*secret.properties
+*secret.env
+
