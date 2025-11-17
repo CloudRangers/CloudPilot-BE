@@ -53,6 +53,21 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
+
+	// RabbitMQ
+	implementation 'org.springframework.boot:spring-boot-starter-amqp'
+	implementation 'org.springframework.retry:spring-retry'
+
+	// JSON 타입 처리
+	implementation 'io.hypersistence:hypersistence-utils-hibernate-63:3.7.0'
+
+	// Jackson LocalDateTime 처리
+	implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+	// RabbitMQ Test
+	testImplementation 'org.springframework.amqp:spring-rabbit-test'
+
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
