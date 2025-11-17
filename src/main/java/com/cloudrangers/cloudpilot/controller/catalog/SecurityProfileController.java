@@ -23,7 +23,7 @@ public class SecurityProfileController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 securityProfileQueryService.getProfiles(page, size, providerId, zoneId, q, sort)
         );
     }

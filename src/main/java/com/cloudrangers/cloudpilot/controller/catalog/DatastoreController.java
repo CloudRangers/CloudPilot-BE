@@ -26,7 +26,7 @@ public class DatastoreController {
             @RequestParam(required = false) Integer requestedCapacityGiB,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 service.getDatastores(page, size, providerId, zoneId, q, type, minFreeGiB, requestedCapacityGiB, sort)
         );
     }

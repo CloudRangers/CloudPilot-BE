@@ -24,6 +24,6 @@ public class PackageCatalogController {
             @RequestParam(required = false) String repo
     ) {
         var result = service.getPackages(page, size, q, osFamily, arch, repo);
-        return ApiResponse.ok(result);
+        return ApiResponse.success(result);
     }
 }

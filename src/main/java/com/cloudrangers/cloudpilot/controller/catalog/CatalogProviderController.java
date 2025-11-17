@@ -23,7 +23,7 @@ public class CatalogProviderController {
             @RequestParam(required=false) String providerType,     // "AWS", "VSPHERE"...
             @RequestParam(required=false, defaultValue="name,asc") String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 providerQueryService.getProviders(page, size, q, providerType, sort)
         );
     }

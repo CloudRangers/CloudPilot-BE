@@ -28,7 +28,7 @@ public class InstanceTypeController {
             @RequestParam(required = false) Boolean burstable,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 service.getInstanceTypes(page, size, providerId, zoneId, q, vcpuMin, vcpuMax, memMinGiB, memMaxGiB, burstable, sort)
         );
     }

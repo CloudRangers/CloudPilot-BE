@@ -23,7 +23,7 @@ public class TerraformVarSetController {
             @RequestParam(required = false) String q,         // name contains
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 service.getVarSets(page, size, scope, moduleId, q, sort)
         );
     }
