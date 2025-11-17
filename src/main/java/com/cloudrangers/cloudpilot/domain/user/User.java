@@ -1,10 +1,7 @@
 package com.cloudrangers.cloudpilot.domain.user;
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -14,6 +11,8 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 @ToString(exclude = "userRoles")
 @Table(name = "`user`") // ✅ 예약어 방지
 public class User {
