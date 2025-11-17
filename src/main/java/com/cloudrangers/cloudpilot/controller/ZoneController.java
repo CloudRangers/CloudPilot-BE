@@ -23,7 +23,7 @@ public class ZoneController {
             @RequestParam(required = false) Long providerId,
             @RequestParam(required = false, defaultValue = "name,asc") String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 zoneQueryService.getZones(page, size, q, providerType, providerId, sort)
         );
     }

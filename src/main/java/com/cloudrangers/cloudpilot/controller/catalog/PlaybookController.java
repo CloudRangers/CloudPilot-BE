@@ -24,6 +24,6 @@ public class PlaybookController {
             @RequestParam(required = false) String tag
     ) {
         var result = service.getPlaybooks(page, size, q, osFamily, arch, tag);
-        return ApiResponse.ok(result);
+        return ApiResponse.success(result);
     }
 }

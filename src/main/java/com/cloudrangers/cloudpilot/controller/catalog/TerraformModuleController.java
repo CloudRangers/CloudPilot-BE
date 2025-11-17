@@ -23,7 +23,7 @@ public class TerraformModuleController {
             @RequestParam(required = false) String version,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 service.getModules(page, size, providerType, q, version, sort)
         );
     }

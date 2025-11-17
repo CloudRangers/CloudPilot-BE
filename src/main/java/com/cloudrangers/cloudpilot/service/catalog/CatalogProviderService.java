@@ -30,7 +30,7 @@ public class CatalogProviderService {
         Page<ProviderLocation> pageData = providerLocationRepository.findAll(spec, pageable);
         List<ProviderCatalogItem> items = pageData.map(ProviderCatalogItem::fromEntity).toList();
 
-        return ApiResponse.ok(PageResponse.of(
+        return ApiResponse.success(PageResponse.of(
                 items,
                 pageData.getNumber(),
                 pageData.getSize(),

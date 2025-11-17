@@ -52,7 +52,7 @@ public class VmController {
             }
         });
 
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 vmQueryService.getVms(
                         page, size, providerType, zoneId, status, powerState, name,
                         ownerUserId, teamId, createdFrom, createdTo, tagEquals, sort
@@ -65,7 +65,7 @@ public class VmController {
      */
     @GetMapping("/{vmId}")
     public ApiResponse<VmDetailResponse> getVmDetail(@PathVariable Long vmId) {
-        return ApiResponse.ok(vmQueryService.getVmDetail(vmId));
+        return ApiResponse.success(vmQueryService.getVmDetail(vmId));
     }
 
     /**
@@ -76,12 +76,12 @@ public class VmController {
             @PathVariable Long vmId,
             @RequestHeader(value = "X-USER-ID", required = false) Long requestedBy // 임시: 인증 연동 전
     ) {
-        return ApiResponse.ok(vmDeleteService.enqueueDeletion(vmId, requestedBy));
+        return ApiResponse.success(vmDeleteService.enqueueDeletion(vmId, requestedBy));
     }
     @PostMapping("/{vmId}/delete-request")
     public ApiResponse<Void> requestDelete(@PathVariable Long vmId) {
         vmQueryService.requestDelete(vmId);
-        return ApiResponse.ok(null);
+        return ApiResponse.success(null);
     }
 
 }

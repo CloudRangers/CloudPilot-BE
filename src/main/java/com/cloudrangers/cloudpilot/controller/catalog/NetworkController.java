@@ -23,7 +23,7 @@ public class NetworkController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String sort
     ) {
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 networkQueryService.getNetworks(page, size, providerId, zoneId, q, sort)
         );
     }

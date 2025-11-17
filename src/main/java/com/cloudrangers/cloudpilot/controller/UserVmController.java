@@ -21,7 +21,7 @@ public class UserVmController {
             @RequestParam(defaultValue = "20") int size
     ) {
         // ownerUserId = userId 강제
-        return ApiResponse.ok(
+        return ApiResponse.success(
                 vmQueryService.getVms(
                         page, size,
                         null, // providerType
