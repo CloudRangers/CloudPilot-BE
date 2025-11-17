@@ -3,14 +3,17 @@ package com.cloudrangers.cloudpilot.security;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtExpiredException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtInvalidException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtMissingSecretException;
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.Key;
+import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.Map;
 
@@ -21,41 +24,41 @@ public class JwtProvider {
     @Value("${jwt.secret}")
     private String secret;
 
-    private static final long ACCESS_TOKEN_EXP_MS  = 1000L * 60 * 30;      // 30분
-    private static final long REFRESH_TOKEN_EXP_MS = 1000L * 60 * 60 * 24 * 14; // 14일
+    private static final long ACCESS_TOKEN_EXP_MS  = 1000L * 60 * 30;
+    private static final long REFRESH_TOKEN_EXP_MS = 1000L * 60 * 60 * 24 * 14;
 
-    private Key getSigningKey() {
+    private SecretKey getSigningKey() {
         if (secret == null || secret.isBlank()) {
             throw new JwtMissingSecretException();
         }
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret));
     }
 
     public String generateAccessToken(String empno, Map<String, Object> claims) {
         return Jwts.builder()
-                .setSubject(empno)
-                .addClaims(claims)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXP_MS))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .subject(empno)
+                .claims(claims)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXP_MS))
+                .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
     }
 
     public String generateRefreshToken(String empno) {
         return Jwts.builder()
-                .setSubject(empno)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXP_MS))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .subject(empno)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + REFRESH_TOKEN_EXP_MS))
+                .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
     }
 
     public boolean validateToken(String token) {
         try {
-            Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
+            Jwts.parser()
+                    .verifyWith(getSigningKey())
                     .build()
-                    .parseClaimsJws(token);
+                    .parseSignedClaims(token);
             return true;
         } catch (ExpiredJwtException e) {
             throw new JwtExpiredException();
@@ -66,11 +69,11 @@ public class JwtProvider {
 
     public Claims parseClaims(String token) {
         try {
-            return Jwts.parserBuilder()
-                    .setSigningKey(getSigningKey())
+            return Jwts.parser()
+                    .verifyWith(getSigningKey())
                     .build()
-                    .parseClaimsJws(token)
-                    .getBody();
+                    .parseSignedClaims(token)
+                    .getPayload();
         } catch (ExpiredJwtException e) {
             throw new JwtExpiredException();
         } catch (JwtException e) {
@@ -94,11 +97,11 @@ public class JwtProvider {
 
     public String generateTokenWithClaims(String subject, Map<String, Object> claims) {
         return Jwts.builder()
-                .setSubject(subject)
-                .addClaims(claims)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXP_MS))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .subject(subject)
+                .claims(claims)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXP_MS))
+                .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
     }
 }
