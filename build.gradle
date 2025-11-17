@@ -1,7 +1,7 @@
 plugins {
-	id 'java'
-	id 'org.springframework.boot' version '3.5.7'
-	id 'io.spring.dependency-management' version '1.1.7'
+    id 'java'
+    id 'org.springframework.boot' version '3.5.7'
+    id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'com.cloudrangers'
@@ -9,74 +9,81 @@ version = '0.0.1-SNAPSHOT'
 description = 'cloudpilot'
 
 java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
-	}
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
 }
 
 configurations {
-	compileOnly {
-		extendsFrom annotationProcessor
-	}
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
 }
 
 repositories {
-	mavenCentral()
+    mavenCentral()
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	implementation 'org.springframework.boot:spring-boot-starter-security'
-	implementation 'org.springframework.boot:spring-boot-starter-validation'
-	implementation 'org.springframework.boot:spring-boot-starter-web'
-	implementation 'com.mysql:mysql-connector-j'
-	runtimeOnly 'org.projectlombok:lombok'
-	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	annotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testImplementation 'org.springframework.security:spring-security-test'
-	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'com.mysql:mysql-connector-j'
+    runtimeOnly 'org.projectlombok:lombok'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     implementation "com.querydsl:querydsl-jpa:5.1.0:jakarta"
     annotationProcessor "com.querydsl:querydsl-apt:5.1.0:jakarta"
     annotationProcessor "jakarta.persistence:jakarta.persistence-api:3.1.0"
     annotationProcessor "jakarta.annotation:jakarta.annotation-api:2.1.1"
-    implementation 'org.flywaydb:flyway-core'
+
+    // Flyway 제거됨
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0'
+
     compileOnly 'org.projectlombok:lombok:1.18.34'
     annotationProcessor 'org.projectlombok:lombok:1.18.34'
     testCompileOnly 'org.projectlombok:lombok:1.18.34'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.34'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+    useJUnitPlatform()
 }
 
 def loadDotenv() {
-	def f = file('.env'); if (!f.exists()) return [:]
-	def m = [:]
-	f.eachLine { raw ->
-		def line = raw.trim()
-		if (!line || line.startsWith('#')) return
-		def i = line.indexOf('=')
-		if (i <= 0) return
-		m[line.substring(0,i).trim()] = line.substring(i+1).trim()
-	}
-	m
+    def f = file('.env'); if (!f.exists()) return [:]
+    def m = [:]
+    f.eachLine { raw ->
+        def line = raw.trim()
+        if (!line || line.startsWith('#')) return
+        def i = line.indexOf('=')
+        if (i <= 0) return
+        m[line.substring(0,i).trim()] = line.substring(i+1).trim()
+    }
+    m
 }
 
 tasks.named('bootRun') {
-	def envs = loadDotenv()
-	if (!envs.isEmpty()) environment envs
-	environment 'SPRING_PROFILES_ACTIVE',
-			System.getenv('SPRING_PROFILES_ACTIVE') ?: envs['SPRING_PROFILES_ACTIVE'] ?: 'local-mysql'
+    def envs = loadDotenv()
+    if (!envs.isEmpty()) {
+        environment envs
+    }
+    // SPRING_PROFILES_ACTIVE 강제 제거 → application.properties만 사용
 }
 
 tasks.withType(Test) {
-	useJUnitPlatform()
-	def envs = loadDotenv()
-	if (!envs.isEmpty()) environment envs
-	environment 'SPRING_PROFILES_ACTIVE',
-			System.getenv('SPRING_PROFILES_ACTIVE') ?: envs['SPRING_PROFILES_ACTIVE'] ?: 'test'
+    useJUnitPlatform()
+    def envs = loadDotenv()
+    if (!envs.isEmpty()) {
+        environment envs
+    }
 }
