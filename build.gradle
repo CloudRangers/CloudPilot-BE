@@ -67,6 +67,7 @@ dependencies {
 	// RabbitMQ Test
 	testImplementation 'org.springframework.amqp:spring-rabbit-test'
 
+    // JUnit
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
