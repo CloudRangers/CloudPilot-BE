@@ -16,7 +16,7 @@ public class RedisConfig {
             @Value("${spring.data.redis.host}") String host,
             @Value("${spring.data.redis.port}") int port
     ) {
-        return new LettuceConnectionFactory(host, port); // ✅ properties 값 반영됨
+        return new LettuceConnectionFactory(host, port);
     }
 
     @Bean
