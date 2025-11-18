@@ -24,27 +24,23 @@ public class UserRole {
     @Column(name = "id")
     private Long id;
 
-    /** 사용자 */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    /** 역할 */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "role_id", nullable = false)
     private Role role;
 
-    /** 팀 */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "team_id", nullable = false)
     private Team team;
 
-    /** 역할 부여 시각 */
     @Column(name = "assigned_at", nullable = false, updatable = false)
-    private LocalDateTime assignedAt = LocalDateTime.now();
+    private LocalDateTime assignedAt;
 
     @PrePersist
     protected void onCreate() {
-        this.assignedAt = LocalDateTime.now();
+        if (assignedAt == null) assignedAt = LocalDateTime.now();
     }
 }

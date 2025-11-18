@@ -35,7 +35,6 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
 
-    /** 로그인 */
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
 
@@ -50,14 +49,7 @@ public class UserServiceImpl implements UserService {
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
-        Map<String, Object> claims = buildClaims(String.valueOf(user.getEmpno()));
-
-        String accessToken = jwtProvider.generateAccessToken(String.valueOf(user.getEmpno()), claims);
-        String refreshToken = jwtProvider.generateRefreshToken(String.valueOf(user.getEmpno()));
-
         return LoginResponse.builder()
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
                 .username(user.getUsername())
                 .roleCode(role.getCode())
                 .roleName(role.getName())
@@ -66,12 +58,23 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
-    /** refresh token → 새로운 access token */
     @Override
-    public String refresh(String refreshToken) {
+    public String refresh(HttpServletRequest request) {
+
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
+            throw new InvalidTokenException("refresh_token 쿠키가 없습니다.");
+        }
+
+        String refreshToken = null;
+        for (Cookie cookie : cookies) {
+            if ("refresh_token".equals(cookie.getName())) {
+                refreshToken = cookie.getValue();
+            }
+        }
 
         if (refreshToken == null) {
-            throw new InvalidTokenException("리프레시 토큰이 없습니다.");
+            throw new InvalidTokenException("refresh_token 쿠키가 없습니다.");
         }
 
         if (redisTemplate.hasKey("BLACKLIST:" + refreshToken)) {
@@ -88,7 +91,6 @@ public class UserServiceImpl implements UserService {
         return jwtProvider.generateAccessToken(empno, claims);
     }
 
-    /** 로그아웃 */
     @Override
     public void logout(HttpServletRequest request) {
 
@@ -104,13 +106,16 @@ public class UserServiceImpl implements UserService {
 
         long expiration = jwtProvider.getRemainingExpiration(token);
 
-        redisTemplate.opsForValue().set("BLACKLIST:" + token, "logout",
-                expiration, TimeUnit.MILLISECONDS);
+        redisTemplate.opsForValue().set(
+                "BLACKLIST:" + token,
+                "logout",
+                expiration,
+                TimeUnit.MILLISECONDS
+        );
 
-        log.info("🚫 로그아웃 완료: {}", token);
+        log.info("로그아웃 완료: {}", token);
     }
 
-    /** 비밀번호 초기화 */
     @Override
     public void sendPasswordResetEmail(String email) {
 
@@ -119,12 +124,16 @@ public class UserServiceImpl implements UserService {
 
         String resetToken = UUID.randomUUID().toString();
 
-        redisTemplate.opsForValue().set("PWD_RESET_TOKEN:" + resetToken, email, 15, TimeUnit.MINUTES);
+        redisTemplate.opsForValue().set(
+                "PWD_RESET_TOKEN:" + resetToken,
+                email,
+                15,
+                TimeUnit.MINUTES
+        );
 
-        log.info("📩 비밀번호 재설정 토큰 발급: {}", resetToken);
+        log.info("비밀번호 재설정 토큰 발급: {}", resetToken);
     }
 
-    /** 비밀번호 재설정 */
     @Override
     public void confirmPasswordReset(String token, String newPassword) {
 
@@ -142,10 +151,9 @@ public class UserServiceImpl implements UserService {
 
         redisTemplate.delete("PWD_RESET_TOKEN:" + token);
 
-        log.info("✅ 비밀번호 재설정 완료: {}", email);
+        log.info("비밀번호 재설정 완료: {}", email);
     }
 
-    /** 비밀번호 변경 */
     @Override
     public void changePassword(String currentPassword, String newPassword) {
 
@@ -163,10 +171,9 @@ public class UserServiceImpl implements UserService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
 
-        log.info("🔑 비밀번호 변경 완료: {}", empno);
+        log.info("비밀번호 변경 완료: {}", empno);
     }
 
-    /** 공통 Claims 빌더 */
     @Override
     public Map<String, Object> buildClaims(String empno) {
 
@@ -178,6 +185,7 @@ public class UserServiceImpl implements UserService {
         var team = userRole.getTeam();
 
         Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", user.getId());
         claims.put("role", role.getCode());
         claims.put("teamId", team != null ? team.getId() : null);
         claims.put("team", team != null ? team.getName() : "GLOBAL");
@@ -185,14 +193,12 @@ public class UserServiceImpl implements UserService {
         return claims;
     }
 
-    /** 역할 우선순위 계산 */
     private UserRole getHighestUserRole(User user) {
         return user.getUserRoles().stream()
                 .max(Comparator.comparingInt(a -> a.getRole().getPermissionLevel()))
                 .orElseThrow(() -> new RuntimeException("역할 정보가 없습니다."));
     }
 
-    /** Access token 추출 */
     private String extractTokenFromCookies(HttpServletRequest request) {
         if (request.getCookies() == null) return null;
         for (Cookie cookie : request.getCookies()) {
@@ -205,6 +211,6 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void updateEmail(Long userId, String newEmail) {
-        // TODO: 이메일 변경 로직
+        // TODO
     }
 }
