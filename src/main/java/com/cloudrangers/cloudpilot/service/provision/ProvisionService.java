@@ -17,6 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.*;
 
+/**
+ * VM 프로비저닝 서비스 (단일/다중 통합)
+ * - vmCount=1: Job 1개 생성 → VM 1개
+ * - vmCount=N: Job N개 생성 → VM N개 (각 Job은 VM 1개씩 담당)
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -26,94 +31,196 @@ public class ProvisionService {
     private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * VM 프로비저닝 요청 처리 (단일/다중 통합)
+     *
+     * @return 단일 생성(vmCount=1): jobs 배열에 1개
+     *         다중 생성(vmCount>1): jobs 배열에 N개
+     */
     @Transactional
     public ProvisionResponse createProvisionJob(ProvisionRequest request, Long userId, Long teamId) {
-        log.info("Creating provision job for user={}, team={}, provider={}, zone={}",
-                userId, teamId, request.getProviderType(), request.getZoneId());
+        // vmCount 기본값 및 검증
+        int vmCount = validateVmCount(request.getVmCount());
+
+        log.info("Creating {} provision job(s) for user={}, team={}, provider={}, zone={}",
+                vmCount, userId, teamId, request.getProviderType(), request.getZoneId());
 
         try {
-            // 1) DB 저장: Integer → Short 캐스팅
-            VmProvisionJob job = VmProvisionJob.builder()
-                    .catalogId(request.getCatalogId())
-                    .teamId(teamId)
-                    .userId(userId)            // 엔티티에 있으면 유지
-                    .createdBy(userId)
-                    .zoneId(toShort(request.getZoneId()))   // ★ 여기서 Short로 저장
-                    .status(VmProvisionStatus.queued)
-                    .retryCount(0)
-                    .maxRetries(3)
-                    .purpose(request.getPurpose())
-                    .createdAt(Instant.now())
-                    .updatedBy(userId)
-                    .build();
+            // vmCount=1: 일반 생성
+            String batchId = vmCount > 1 ? UUID.randomUUID().toString() : null;
+            List<Long> jobIds = new ArrayList<>();
 
-            VmProvisionJob saved = provisionJobRepository.save(job);
+            // vmCount만큼 Job 생성 (1이면 1번, 3이면 3번)
+            for (int i = 0; i < vmCount; i++) {
+                // 1. VM 이름 생성
+                String vmName = generateVmName(request.getVmName(), i, vmCount);
 
-            // 2) 워커로 보낼 메시지: Integer 유지
-            ProvisionJobMessage message = ProvisionJobMessage.builder()
-                    .jobId(String.valueOf(saved.getId()))
-                    .userId(userId)
-                    .teamId(teamId)
-                    .zoneId(request.getZoneId())
-                    .providerType(request.getProviderType() != null
-                            ? request.getProviderType()
-                            : enumVsphereFallback())
-                    .action("apply")
-                    .request(request)
-                    .vmCount(request.getVmCount())
-                    .vmName(request.getVmName())
-                    .cpuCores(request.getCpuCores())
-                    .memoryGb(request.getMemoryGb())
-                    .diskGb(request.getDiskGb())
-                    .tags(request.getTags())
-                    .additionalConfig(request.getAdditionalConfig())
-                    .build();
+                // 2. DB에 Job 레코드 생성
+                VmProvisionJob job = createJobRecord(request, userId, teamId, vmName, batchId, i, vmCount);
+                VmProvisionJob saved = provisionJobRepository.save(job);
+                jobIds.add(saved.getId());
 
-            jobQueueService.pushJob(message, false);
-            log.info("Provision job pushed. jobId={}", saved.getId());
-            return mapToResponse(saved);
+                // 3. 큐에 메시지 발행 (항상 vmCount=1로 고정)
+                publishJobMessage(request, userId, teamId, saved.getId(), vmName, batchId, i);
+
+                log.debug("Job created: id={}, vmName={}, batch={}, index={}/{}",
+                        saved.getId(), vmName, batchId != null ? batchId.substring(0, 8) : "single", i + 1, vmCount);
+            }
+
+            log.info("Provision job(s) created successfully. count={}, jobIds={}", vmCount, jobIds);
+
+            // 응답 생성 (단일/다중 모두 동일한 구조)
+            return buildResponse(jobIds, vmCount, batchId);
 
         } catch (Exception e) {
-            log.error("Failed to create provision job", e);
-            throw new ProvisionException("프로비저닝 Job 생성 실패: " + e.getMessage());
+            log.error("Failed to create provision job(s). vmCount={}", vmCount, e);
+            throw new ProvisionException("프로비저닝 Job 생성 실패: " + e.getMessage(), e);
         }
     }
 
-    // ===== helpers =====
-    private ProviderType enumVsphereFallback() {
-        return com.cloudrangers.cloudpilot.enums.ProviderType.VSPHERE;
+    // ===== Private Methods =====
+
+    /**
+     * vmCount 검증
+     */
+    private int validateVmCount(Integer vmCount) {
+        int count = vmCount != null ? vmCount : 1;
+        if (count < 1) {
+            throw new ProvisionException("vmCount는 최소 1이어야 합니다: " + count);
+        }
+        if (count > 100) {
+            throw new ProvisionException("vmCount는 최대 100까지 가능합니다: " + count);
+        }
+        return count;
     }
 
-    private ProvisionResponse mapToResponse(VmProvisionJob job) {
-        return ProvisionResponse.builder()
-                .id(job.getId())
-                .jobId(String.valueOf(job.getId()))
-                .catalogId(job.getCatalogId())           // ✅ 중복/널 오버라이드 제거
-                .userId(job.getCreatedBy())
-                .teamId(job.getTeamId())
-                .status(mapStatus(job.getStatus()))
-                .errorMessage(job.getErrorMessage())
-                .retryCount(job.getRetryCount())
-                .startedAt(job.getStartedAt())
-                .completedAt(job.getFinishedAt())
-                .createdAt(job.getCreatedAt())
-                .updatedAt(job.getFinishedAt() != null ? job.getFinishedAt() : job.getCreatedAt())
+    /**
+     * VM 이름 생성
+     * - 단일(vmCount=1): web-server (그대로)
+     * - 다중(vmCount>1): web-server-01, web-server-02, ...
+     */
+    private String generateVmName(String baseName, int index, int totalCount) {
+        // 기본 이름이 없으면 자동 생성
+        if (baseName == null || baseName.isBlank()) {
+            baseName = "vm-" + UUID.randomUUID().toString().substring(0, 8);
+        }
+
+        // 단일 생성이면 그대로 반환
+        if (totalCount == 1) {
+            return baseName;
+        }
+
+        // 다중 생성: 이미 숫자로 끝나면 제거
+        String cleanName = baseName.replaceAll("-?\\d+$", "");
+
+        // 패딩 길이 계산 (99개 이하: 2자리, 100개: 3자리)
+        int padding = totalCount <= 99 ? 2 : 3;
+        String suffix = String.format("%0" + padding + "d", index + 1);
+
+        return cleanName + "-" + suffix;
+    }
+
+    /**
+     * Job 레코드 생성
+     */
+    private VmProvisionJob createJobRecord(
+            ProvisionRequest request, Long userId, Long teamId,
+            String vmName, String batchId, int index, int totalCount) {
+
+        String purpose = request.getPurpose() != null ? request.getPurpose() : "VM Provisioning";
+
+        return VmProvisionJob.builder()
+                .catalogId(request.getCatalogId())
+                .teamId(teamId)
+                .userId(userId)
+                .createdBy(userId)
+                .zoneId(toShort(request.getZoneId()))
+                .status(VmProvisionStatus.queued)
+                .retryCount(0)
+                .maxRetries(3)
+                .purpose(purpose)
+                .createdAt(Instant.now())
+                .updatedBy(userId)
                 .build();
     }
 
-    private VmProvisionStatus mapStatus(VmProvisionStatus s) {
-        if (s == null) return null;
-        return switch (s) {
-            case queued -> VmProvisionStatus.queued;
-            case running -> VmProvisionStatus.running;
-            case succeeded -> VmProvisionStatus.succeeded;
-            case failed, canceled -> VmProvisionStatus.failed;
-        };
+    /**
+     * 큐에 메시지 발행
+     * 중요: 항상 vmCount=1로 고정!
+     */
+    private void publishJobMessage(
+            ProvisionRequest request, Long userId, Long teamId,
+            Long jobId, String vmName, String batchId, int index) {
+
+        // 태그 생성 (다중일 때만 배치 태그 추가)
+        Map<String, String> tags = request.getTags() != null
+                ? new HashMap<>(request.getTags())   // 원래 태그 복사
+                : new HashMap<>();                   // null이면 빈 Map
+
+        // 추가 설정 (다중일 때만 배치 정보 추가)
+        Map<String, Object> additionalConfig = new LinkedHashMap<>(
+                request.getAdditionalConfig() != null ? request.getAdditionalConfig() : new HashMap<>());
+
+        ProvisionJobMessage message = ProvisionJobMessage.builder()
+                .jobId(String.valueOf(jobId))
+                .userId(userId)
+                .teamId(teamId)
+                .zoneId(request.getZoneId())
+                .providerType(request.getProviderType() != null
+                        ? request.getProviderType()
+                        : ProviderType.VSPHERE)
+                .action("apply")
+                .request(request)
+                .vmCount(1)
+                .vmName(vmName)
+                .cpuCores(request.getCpuCores())
+                .memoryGb(request.getMemoryGb())
+                .diskGb(request.getDiskGb())
+                .tags(tags)
+                .additionalConfig(additionalConfig)
+                .build();
+
+        jobQueueService.pushJob(message, false);
     }
 
+    /**
+     * 응답 생성
+     * - 단일/다중 모두 동일한 구조 사용
+     */
+    private ProvisionResponse buildResponse(List<Long> jobIds, int vmCount, String batchId) {
+        ProvisionResponse response = new ProvisionResponse();
+
+        // 기본 정보
+        response.setTotalCount(vmCount);
+        response.setJobIds(jobIds);
+        response.setCreatedAt(Instant.now());
+
+        // 단일 생성
+        if (vmCount == 1) {
+            response.setJobId(String.valueOf(jobIds.get(0)));
+            response.setStatus(VmProvisionStatus.queued);
+            response.setMessage("VM 생성 작업이 큐에 등록되었습니다");
+        }
+        // 다중 생성
+        else {
+            response.setBatchId(batchId);
+            response.setStatus(VmProvisionStatus.queued);
+            response.setMessage(String.format("%d개의 VM 생성 작업이 큐에 등록되었습니다", vmCount));
+        }
+
+        return response;
+    }
+
+    /**
+     * Integer → short 변환
+     */
     private short toShort(Integer v) {
-        if (v == null) throw new ProvisionException("zoneId는 필수입니다");
-        if (v < 0 || v > Short.MAX_VALUE) throw new ProvisionException("zoneId 범위 초과(SMALLINT): " + v);
+        if (v == null) {
+            throw new ProvisionException("zoneId는 필수입니다");
+        }
+        if (v < 0 || v > Short.MAX_VALUE) {
+            throw new ProvisionException("zoneId 범위 초과(SMALLINT): " + v);
+        }
         return v.shortValue();
     }
 }

@@ -29,7 +29,7 @@ public class UserVmController {
                         null, // status
                         null, // powerState
                         null, // name
-                        userId, // <-- 핵심
+                        userId,
                         null, // teamId
                         null, null, null, null
                 )

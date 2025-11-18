@@ -58,7 +58,7 @@ replay_pid*
 *.stackdump
 
 ### Spring Boot 로컬 설정/시크릿 ###
-src/main/resources/.env
+.env
 .env.*
 !.env.example
 .envrc
@@ -142,3 +142,4 @@ secrets/
 *secret.properties
 *secret.env
 
+src/main/generated/
