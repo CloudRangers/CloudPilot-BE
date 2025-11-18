@@ -13,13 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
 
 @Slf4j
 @Component
@@ -43,9 +41,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
-            log.warn("blacklisted token");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write("Token is blacklisted.");
+            response.getWriter().write("Token is blacklisted");
             return;
         }
 
@@ -54,13 +51,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 Claims claims = jwtProvider.parseClaims(token);
 
+                Long userId = claims.get("userId", Long.class);
                 String empno = claims.getSubject();
+                String role = claims.get("role", String.class);
+                Long teamId = claims.get("teamId", Long.class);
+
+                CustomUserDetails principal = new CustomUserDetails(userId, empno, role, teamId);
 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
-                                new User(empno, "", Collections.emptyList()),
+                                principal,
                                 null,
-                                Collections.emptyList()
+                                principal.getAuthorities()
                         );
 
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -69,19 +71,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
         } catch (JwtExpiredException e) {
-            log.warn("token expired");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Access token expired");
             return;
 
         } catch (JwtInvalidException e) {
-            log.warn("invalid token");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid token");
             return;
 
         } catch (Exception e) {
-            log.error("filter error: {}", e.getMessage());
+            log.error("JWT filter error: {}", e.getMessage());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid authorization");
             return;
@@ -97,8 +97,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return header.substring(7);
         }
 
-        if (request.getCookies() != null) {
-            for (Cookie cookie : request.getCookies()) {
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
                 if ("access_token".equals(cookie.getName())) {
                     return cookie.getValue();
                 }

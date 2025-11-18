@@ -4,9 +4,9 @@ import com.cloudrangers.cloudpilot.exception.jwt.JwtExpiredException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtInvalidException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtMissingSecretException;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -60,8 +60,10 @@ public class JwtProvider {
                     .build()
                     .parseSignedClaims(token);
             return true;
+
         } catch (ExpiredJwtException e) {
             throw new JwtExpiredException();
+
         } catch (JwtException | IllegalArgumentException e) {
             throw new JwtInvalidException();
         }
@@ -74,8 +76,10 @@ public class JwtProvider {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+
         } catch (ExpiredJwtException e) {
             throw new JwtExpiredException();
+
         } catch (JwtException e) {
             throw new JwtInvalidException();
         }
@@ -89,19 +93,11 @@ public class JwtProvider {
         try {
             long now = System.currentTimeMillis();
             long exp = parseClaims(token).getExpiration().getTime();
-            return Math.max(exp - now, 0);
-        } catch (Exception e) {
-            return 0;
-        }
-    }
+            long remain = exp - now;
+            return remain > 1000 ? remain : 1000;  // 최소 1초 보장
 
-    public String generateTokenWithClaims(String subject, Map<String, Object> claims) {
-        return Jwts.builder()
-                .subject(subject)
-                .claims(claims)
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + ACCESS_TOKEN_EXP_MS))
-                .signWith(getSigningKey(), Jwts.SIG.HS256)
-                .compact();
+        } catch (Exception e) {
+            return 1000; // 최소 1초
+        }
     }
 }

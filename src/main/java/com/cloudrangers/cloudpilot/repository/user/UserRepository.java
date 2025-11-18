@@ -10,7 +10,24 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmpno(Long empno);
     Optional<User> findByEmail(String email);
 
-    // ✅ 로그인 시 user → userRoles → role, team 까지 즉시 로딩
-    @EntityGraph(attributePaths = {"userRoles", "userRoles.role", "userRoles.team"})
+    @EntityGraph(attributePaths = {
+            "userRoles",
+            "userRoles.role",
+            "userRoles.team"
+    })
     Optional<User> findWithRolesByEmpno(Long empno);
+
+    @EntityGraph(attributePaths = {
+            "userRoles",
+            "userRoles.role",
+            "userRoles.team"
+    })
+    Optional<User> findWithRolesById(Long id);
+
+    @EntityGraph(attributePaths = {
+            "userRoles",
+            "userRoles.role",
+            "userRoles.team"
+    })
+    Optional<User> findWithRolesByEmail(String email);
 }

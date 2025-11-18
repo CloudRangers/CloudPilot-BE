@@ -8,8 +8,6 @@ import lombok.NoArgsConstructor;
 @Getter
 public class LoginResponse {
 
-    private String accessToken;
-    private String refreshToken;
     private String username;
     private String roleCode;
     private String roleName;
@@ -18,16 +16,12 @@ public class LoginResponse {
 
     @Builder
     public LoginResponse(
-            String accessToken,
-            String refreshToken,
             String username,
             String roleCode,
             String roleName,
             Long teamId,
             String teamName
     ) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
         this.username = username;
         this.roleCode = roleCode;
         this.roleName = roleName;
