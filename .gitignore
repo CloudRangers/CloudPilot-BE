@@ -142,3 +142,4 @@ secrets/
 *secret.properties
 *secret.env
 
+src/main/generated/
