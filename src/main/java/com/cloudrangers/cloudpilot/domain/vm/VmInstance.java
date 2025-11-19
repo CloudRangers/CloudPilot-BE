@@ -32,7 +32,20 @@ public class VmInstance {
     private Long ownerUserId;
     private Long teamId;
 
+    @Column(name = "os_image_id")
+    private Long osImageId;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    private String tags; // JSON 문자열로 저장될 수 있음
+    @Column(name = "created_by", nullable = false, updatable = false)
+    private Long createdBy;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    @Column(name = "updated_by", nullable = false)
+    private Long updatedBy;
+
+    private String tags;
 }

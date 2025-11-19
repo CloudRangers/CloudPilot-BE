@@ -38,8 +38,10 @@ public class VmProvisionService {
         }
 
         for (InstanceInfo info : instances) {
+            Instant now = Instant.now();
+
             VmInstance vm = VmInstance.builder()
-                    // vm 이름
+                    // VM 이름
                     .name(defaultString(info.getName(), "vm-" + job.getId()))
 
                     // provider / zone
@@ -47,20 +49,23 @@ public class VmProvisionService {
                     .zoneId(resolveZoneId(info, job))
 
                     // 상태
-                    .lifecycle("running")  // creating → running
+                    .lifecycle("running")     // creating → running
                     .powerState("ON")
 
                     // 스펙
                     .vcpu(info.getCpuCores())
-                    .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null) // GB → MB
+                    .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null)  // GB → MB
                     .rootDiskGb(info.getDiskGb())
 
                     // 소유자 정보
                     .ownerUserId(job.getUserId())
                     .teamId(job.getTeamId())
 
-                    // 생성 시간
-                    .createdAt(Instant.now())
+                    // 생성/수정 정보
+                    .createdAt(now)
+                    .createdBy(job.getUserId())
+                    .updatedAt(now)
+                    .updatedBy(job.getUserId())
 
                     // 부가 정보(JSON)
                     .tags(buildTags(info))
@@ -73,8 +78,12 @@ public class VmProvisionService {
     }
 
     private Long resolveZoneId(InstanceInfo info, VmProvisionJob job) {
-        if (info.getZoneId() != null) return info.getZoneId();
-        if (job.getZoneId() != null) return job.getZoneId().longValue();
+        if (info.getZoneId() != null) {
+            return info.getZoneId();
+        }
+        if (job.getZoneId() != null) {
+            return job.getZoneId().longValue();
+        }
         return null;
     }
 
@@ -85,11 +94,19 @@ public class VmProvisionService {
     private String buildTags(InstanceInfo info) {
         Map<String, Object> m = new LinkedHashMap<>();
 
-        if (info.getExternalId() != null) m.put("externalId", info.getExternalId());
-        if (info.getIpAddress() != null)  m.put("ipAddress", info.getIpAddress());
-        if (info.getOsType() != null)     m.put("osType", info.getOsType());
+        if (info.getExternalId() != null) {
+            m.put("externalId", info.getExternalId());
+        }
+        if (info.getIpAddress() != null) {
+            m.put("ipAddress", info.getIpAddress());
+        }
+        if (info.getOsType() != null) {
+            m.put("osType", info.getOsType());
+        }
 
-        if (m.isEmpty()) return null;
+        if (m.isEmpty()) {
+            return null;
+        }
 
         try {
             return objectMapper.writeValueAsString(m);
