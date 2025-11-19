@@ -28,15 +28,16 @@ public class ProvisionController {
     public ResponseEntity<ProvisionResponse> createProvisionJob(
             @Valid @RequestBody ProvisionRequest request,
             @RequestHeader("X-User-Id") Long userId,
-            @RequestHeader("X-Team-Id") Long teamId
+            @RequestHeader(value = "X-Team-Id", required = false) Long callerTeamId
     ) {
-        int vmCount = request.getVmCount() != null ? request.getVmCount() : 1;
+        int vmCount = request.getVmCountOrDefault();
 
-        log.info("Received provision request: user={}, team={}, vmCount={}, vmName={}",
-                userId, teamId, vmCount, request.getVmName());
+        log.info("Received provision request: user={}, callerTeam={}, requestTeam={}, vmCount={}, vmName={}",
+                userId, callerTeamId, request.getTeamId(), vmCount, request.getVmName());
 
-        ProvisionResponse response = provisionService.createProvisionJob(request, userId, teamId);
+        ProvisionResponse response = provisionService.createProvisionJob(request, userId, callerTeamId);
 
         return ResponseEntity.accepted().body(response);
     }
+
 }

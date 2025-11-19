@@ -34,19 +34,22 @@ public class ProvisionService {
     /**
      * VM 프로비저닝 요청 처리 (단일/다중 통합)
      *
-     * @return 단일 생성(vmCount=1): jobs 배열에 1개
-     *         다중 생성(vmCount>1): jobs 배열에 N개
+     * @param request      클라이언트 요청 (teamId = VM 소유 팀)
+     * @param userId       호출자 사용자 ID
+     * @param teamId       호출자 팀 ID (없을 수 있음)
      */
     @Transactional
     public ProvisionResponse createProvisionJob(ProvisionRequest request, Long userId, Long teamId) {
         // vmCount 기본값 및 검증
         int vmCount = validateVmCount(request.getVmCount());
 
-        log.info("Creating {} provision job(s) for user={}, team={}, provider={}, zone={}",
-                vmCount, userId, teamId, request.getProviderType(), request.getZoneId());
+        // 호출자 팀과 요청의 teamId를 기준으로 최종 소유 팀 결정
+        Long ownerTeamId = resolveOwnerTeamId(request, userId, teamId);
+
+        log.info("Creating {} provision job(s) for user={}, callerTeam={}, ownerTeam={}, provider={}, zone={}",
+                vmCount, userId, teamId, ownerTeamId, request.getProviderType(), request.getZoneId());
 
         try {
-            // vmCount=1: 일반 생성
             String batchId = vmCount > 1 ? UUID.randomUUID().toString() : null;
             List<Long> jobIds = new ArrayList<>();
 
@@ -56,12 +59,12 @@ public class ProvisionService {
                 String vmName = generateVmName(request.getVmName(), i, vmCount);
 
                 // 2. DB에 Job 레코드 생성
-                VmProvisionJob job = createJobRecord(request, userId, teamId, vmName, batchId, i, vmCount);
+                VmProvisionJob job = createJobRecord(request, userId, ownerTeamId, vmName, batchId, i, vmCount);
                 VmProvisionJob saved = provisionJobRepository.save(job);
                 jobIds.add(saved.getId());
 
                 // 3. 큐에 메시지 발행 (항상 vmCount=1로 고정)
-                publishJobMessage(request, userId, teamId, saved.getId(), vmName, batchId, i);
+                publishJobMessage(request, userId, ownerTeamId, saved.getId(), vmName, batchId, i);
 
                 log.debug("Job created: id={}, vmName={}, batch={}, index={}/{}",
                         saved.getId(), vmName, batchId != null ? batchId.substring(0, 8) : "single", i + 1, vmCount);
@@ -79,6 +82,44 @@ public class ProvisionService {
     }
 
     // ===== Private Methods =====
+
+    /**
+     * 호출자 팀 + 요청 바디의 teamId를 기반으로 VM 소유 팀 결정
+     *
+     * 규칙:
+     * - callerTeamId != null (일반 팀원)
+     *   - request.teamId == null → callerTeamId 사용
+     *   - request.teamId != callerTeamId → 예외 (다른 팀에 생성 불가)
+     * - callerTeamId == null (부장/관리자)
+     *   - request.teamId == null → 예외 (어느 팀 소유인지 명시 필요)
+     *   - request.teamId != null → 그 팀을 소유 팀으로 사용
+     */
+    private Long resolveOwnerTeamId(ProvisionRequest request, Long userId, Long callerTeamId) {
+        Long requestTeamId = request.getTeamId();
+
+        // 1) 일반 팀원: callerTeamId != null
+        if (callerTeamId != null) {
+            if (requestTeamId == null) {
+
+                return callerTeamId;
+            }
+            if (!callerTeamId.equals(requestTeamId)) {
+                throw new ProvisionException(
+                        "다른 팀으로 VM을 생성할 수 없습니다. (요청 teamId=" +
+                                requestTeamId + ", callerTeamId=" + callerTeamId + ")"
+                );
+            }
+            return callerTeamId;
+        }
+
+        // 2) 부장/관리자: callerTeamId == null → 요청에 teamId가 반드시 있어야 함
+        if (requestTeamId == null) {
+            throw new ProvisionException("팀이 없는 사용자는 요청에 teamId를 반드시 포함해야 합니다.");
+        }
+
+        // TODO: userId가 해당 teamId에 대한 프로비저닝 권한이 있는지 추가 검증 가능
+        return requestTeamId;
+    }
 
     /**
      * vmCount 검증
@@ -124,14 +165,14 @@ public class ProvisionService {
      * Job 레코드 생성
      */
     private VmProvisionJob createJobRecord(
-            ProvisionRequest request, Long userId, Long teamId,
+            ProvisionRequest request, Long userId, Long ownerTeamId,
             String vmName, String batchId, int index, int totalCount) {
 
         String purpose = request.getPurpose() != null ? request.getPurpose() : "VM Provisioning";
 
         return VmProvisionJob.builder()
                 .catalogId(request.getCatalogId())
-                .teamId(teamId)
+                .teamId(ownerTeamId)           // ★ 소유 팀 기준
                 .userId(userId)
                 .createdBy(userId)
                 .zoneId(toShort(request.getZoneId()))
@@ -149,22 +190,25 @@ public class ProvisionService {
      * 중요: 항상 vmCount=1로 고정!
      */
     private void publishJobMessage(
-            ProvisionRequest request, Long userId, Long teamId,
+            ProvisionRequest request, Long userId, Long ownerTeamId,
             Long jobId, String vmName, String batchId, int index) {
 
-        // 태그 생성 (다중일 때만 배치 태그 추가)
+        // 태그 생성
         Map<String, String> tags = request.getTags() != null
                 ? new HashMap<>(request.getTags())   // 원래 태그 복사
                 : new HashMap<>();                   // null이면 빈 Map
 
-        // 추가 설정 (다중일 때만 배치 정보 추가)
+        // TeamId 태그도 같이 넣어두고 싶으면 (선택)
+        tags.putIfAbsent("TeamId", String.valueOf(ownerTeamId));
+
+        // 추가 설정
         Map<String, Object> additionalConfig = new LinkedHashMap<>(
                 request.getAdditionalConfig() != null ? request.getAdditionalConfig() : new HashMap<>());
 
         ProvisionJobMessage message = ProvisionJobMessage.builder()
                 .jobId(String.valueOf(jobId))
                 .userId(userId)
-                .teamId(teamId)
+                .teamId(ownerTeamId)                 // ★ 소유 팀 기준
                 .zoneId(request.getZoneId())
                 .providerType(request.getProviderType() != null
                         ? request.getProviderType()
