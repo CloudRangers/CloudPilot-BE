@@ -3,6 +3,7 @@ package com.cloudrangers.cloudpilot.controller;
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.dto.request.LoginRequest;
 import com.cloudrangers.cloudpilot.dto.response.LoginResponse;
+import com.cloudrangers.cloudpilot.security.JwtProvider;
 import com.cloudrangers.cloudpilot.service.user.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -13,8 +14,6 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 @Slf4j
 @RestController
 @RequestMapping("/auth")
@@ -22,42 +21,45 @@ import java.util.Map;
 public class AuthController {
 
     private final UserService userService;
+    private final JwtProvider jwtProvider;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody LoginRequest request) {
-        LoginResponse response = userService.login(request);
 
-        ResponseCookie accessCookie = ResponseCookie.from("access_token", response.getAccessToken())
+        LoginResponse info = userService.login(request);
+
+        String empno = String.valueOf(request.getEmpno());
+        var claims = userService.buildClaims(empno);
+
+        String accessToken = jwtProvider.generateAccessToken(empno, claims);
+        String refreshToken = jwtProvider.generateRefreshToken(empno);
+
+        ResponseCookie accessCookie = ResponseCookie.from("access_token", accessToken)
                 .httpOnly(true).secure(true).sameSite("Strict")
-                .path("/").maxAge(3600).build();
+                .path("/").maxAge(60 * 30).build();
 
-        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", response.getRefreshToken())
+        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
                 .httpOnly(true).secure(true).sameSite("Strict")
-                .path("/").maxAge(60 * 60 * 24 * 14).build();
-
-        LoginResponse sanitized = LoginResponse.builder()
-                .username(response.getUsername())
-                .roleCode(response.getRoleCode())
-                .roleName(response.getRoleName())
-                .teamName(response.getTeamName())
-                .build();
+                .path("/").maxAge(60L * 60 * 24 * 14).build();
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
                 .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
-                .body(ApiResponse.success(sanitized));
+                .body(ApiResponse.success(info));
     }
 
-    // NEW — refresh()
     @PostMapping("/refresh")
-    public ResponseEntity<ApiResponse<Void>> refreshToken(
-            @CookieValue(value = "refresh_token", required = false) String refreshToken) {
+    public ResponseEntity<ApiResponse<Void>> refreshToken(HttpServletRequest request) {
 
-        String newAccessToken = userService.refresh(refreshToken);
+        String newAccessToken = userService.refresh(request);
 
         ResponseCookie newAccessCookie = ResponseCookie.from("access_token", newAccessToken)
-                .httpOnly(true).secure(true).sameSite("Strict")
-                .path("/").maxAge(60 * 30).build();
+                .httpOnly(true)
+                .secure(true)
+                .sameSite("Strict")
+                .path("/")
+                .maxAge(60 * 30)
+                .build();
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, newAccessCookie.toString())
@@ -66,15 +68,14 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(HttpServletRequest request, HttpServletResponse response) {
+
         userService.logout(request);
 
         ResponseCookie clearAccess = ResponseCookie.from("access_token", "")
-                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict")
-                .build();
+                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict").build();
 
         ResponseCookie clearRefresh = ResponseCookie.from("refresh_token", "")
-                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict")
-                .build();
+                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict").build();
 
         response.addHeader("Set-Cookie", clearAccess.toString());
         response.addHeader("Set-Cookie", clearRefresh.toString());
@@ -104,4 +105,3 @@ public class AuthController {
         return ApiResponse.success(null);
     }
 }
-

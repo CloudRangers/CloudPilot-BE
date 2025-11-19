@@ -14,6 +14,6 @@ public interface UserService {
     void changePassword(String currentPassword, String newPassword);
     void updateEmail(Long userId, String newEmail);
     Map<String, Object> buildClaims(String empno);
-    String refresh(String refreshToken);
 
+    String refresh(HttpServletRequest request);
 }
