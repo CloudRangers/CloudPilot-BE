@@ -127,13 +127,14 @@ public class PermissionChecker {
 
         boolean canExecute = flag(pkg, "execute");
         if (!canExecute) return false;
-        if ("ADMIN".equalsIgnoreCase(roleCode) && "system_all".equals(scope)) return true;
+
+        if ("ADMIN".equalsIgnoreCase(roleCode)) return true;
 
         return switch (scope) {
             case "system_all" -> true;
             case "multi_team" -> true;
             case "own_team" -> userTeamId != null && userTeamId.equals(vmTeamId);
-            case "self_only" -> userId != null && userId.equals(vmOwnerId);
+            case "self_only" -> false;
             default -> false;
         };
     }
