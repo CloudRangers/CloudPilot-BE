@@ -43,69 +43,29 @@ public class ProvisionResultMessage {
 
     // === getter / setter ===
 
-    public String getJobId() {
-        return jobId;
-    }
+    public String getJobId() { return jobId; }
+    public void setJobId(String jobId) { this.jobId = jobId; }
 
-    public void setJobId(String jobId) {
-        this.jobId = jobId;
-    }
+    public EventType getEventType() { return eventType; }
+    public void setEventType(EventType eventType) { this.eventType = eventType; }
 
-    public EventType getEventType() {
-        return eventType;
-    }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
-    public void setEventType(EventType eventType) {
-        this.eventType = eventType;
-    }
+    public String getVmId() { return vmId; }
+    public void setVmId(String vmId) { this.vmId = vmId; }
 
-    public String getStatus() {
-        return status;
-    }
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
 
-    public void setStatus(String status) {
-        this.status = status;
-    }
+    public String getStep() { return step; }
+    public void setStep(String step) { this.step = step; }
 
-    public String getVmId() {
-        return vmId;
-    }
+    public OffsetDateTime getTimestamp() { return timestamp; }
+    public void setTimestamp(OffsetDateTime timestamp) { this.timestamp = timestamp; }
 
-    public void setVmId(String vmId) {
-        this.vmId = vmId;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
-    }
-
-    public String getStep() {
-        return step;
-    }
-
-    public void setStep(String step) {
-        this.step = step;
-    }
-
-    public OffsetDateTime getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(OffsetDateTime timestamp) {
-        this.timestamp = timestamp;
-    }
-
-    public List<InstanceInfo> getInstances() {
-        return instances;
-    }
-
-    public void setInstances(List<InstanceInfo> instances) {
-        this.instances = instances;
-    }
+    public List<InstanceInfo> getInstances() { return instances; }
+    public void setInstances(List<InstanceInfo> instances) { this.instances = instances; }
 
     @Override
     public String toString() {
@@ -123,89 +83,51 @@ public class ProvisionResultMessage {
 
     // VM 한 개에 대한 정보 (워커에서 채워서 보내줌)
     public static class InstanceInfo {
+
         private String name;
-        private String externalId;   // vSphere vm-123 같은 ID
+        private String externalId;   // vSphere vm-123 이런 기본 ID
         private Long zoneId;
-        private String providerType; // VSPHERE 등
+        private String providerType;
         private Integer cpuCores;
         private Integer memoryGb;
         private Integer diskGb;
         private String ipAddress;
         private String osType;
 
+        // ⭐ nic 주소들: "172.16.0.10,172.16.0.11" 이런 식의 콤마 구분 문자열
+        private String nicAddresses;
+
         public InstanceInfo() {}
 
-        public String getName() {
-            return name;
-        }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
 
-        public void setName(String name) {
-            this.name = name;
-        }
+        public String getExternalId() { return externalId; }
+        public void setExternalId(String externalId) { this.externalId = externalId; }
 
-        public String getExternalId() {
-            return externalId;
-        }
+        public Long getZoneId() { return zoneId; }
+        public void setZoneId(Long zoneId) { this.zoneId = zoneId; }
 
-        public void setExternalId(String externalId) {
-            this.externalId = externalId;
-        }
+        public String getProviderType() { return providerType; }
+        public void setProviderType(String providerType) { this.providerType = providerType; }
 
-        public Long getZoneId() {
-            return zoneId;
-        }
+        public Integer getCpuCores() { return cpuCores; }
+        public void setCpuCores(Integer cpuCores) { this.cpuCores = cpuCores; }
 
-        public void setZoneId(Long zoneId) {
-            this.zoneId = zoneId;
-        }
+        public Integer getMemoryGb() { return memoryGb; }
+        public void setMemoryGb(Integer memoryGb) { this.memoryGb = memoryGb; }
 
-        public String getProviderType() {
-            return providerType;
-        }
+        public Integer getDiskGb() { return diskGb; }
+        public void setDiskGb(Integer diskGb) { this.diskGb = diskGb; }
 
-        public void setProviderType(String providerType) {
-            this.providerType = providerType;
-        }
+        public String getIpAddress() { return ipAddress; }
+        public void setIpAddress(String ipAddress) { this.ipAddress = ipAddress; }
 
-        public Integer getCpuCores() {
-            return cpuCores;
-        }
+        public String getOsType() { return osType; }
+        public void setOsType(String osType) { this.osType = osType; }
 
-        public void setCpuCores(Integer cpuCores) {
-            this.cpuCores = cpuCores;
-        }
-
-        public Integer getMemoryGb() {
-            return memoryGb;
-        }
-
-        public void setMemoryGb(Integer memoryGb) {
-            this.memoryGb = memoryGb;
-        }
-
-        public Integer getDiskGb() {
-            return diskGb;
-        }
-
-        public void setDiskGb(Integer diskGb) {
-            this.diskGb = diskGb;
-        }
-
-        public String getIpAddress() {
-            return ipAddress;
-        }
-
-        public void setIpAddress(String ipAddress) {
-            this.ipAddress = ipAddress;
-        }
-
-        public String getOsType() {
-            return osType;
-        }
-
-        public void setOsType(String osType) {
-            this.osType = osType;
-        }
+        public String getNicAddresses() { return nicAddresses; }
+        public void setNicAddresses(String nicAddresses) { this.nicAddresses = nicAddresses; }
 
         @Override
         public String toString() {
@@ -219,6 +141,7 @@ public class ProvisionResultMessage {
                     ", diskGb=" + diskGb +
                     ", ipAddress='" + ipAddress + '\'' +
                     ", osType='" + osType + '\'' +
+                    ", nicAddresses='" + nicAddresses + '\'' +
                     '}';
         }
     }
