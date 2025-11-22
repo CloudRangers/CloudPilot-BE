@@ -125,6 +125,17 @@ public class PackageService {
      *  - reason: 승인/거절 사유 (pkg_approval.description에 저장)
      */
     @Transactional
+    public PkgRequestResponse approveOrReject(Long requestId, Long approverId, PkgApprovalActionRequest body) {
+        String step = body.getStep(); // "L1" or "FINAL"
+        if ("L1".equalsIgnoreCase(step)) {
+            return handleL1Approval(requestId, approverId, body);
+        } else if ("FINAL".equalsIgnoreCase(step)) {
+            return handleFinalApproval(requestId, approverId, body);
+        } else {
+            throw new IllegalArgumentException("Invalid step: " + step);
+        }
+    }
+    @Transactional
     public PkgRequestResponse handleL1Approval(Long requestId, Long approverId, PkgApprovalActionRequest body) {
 
         if (!permissionChecker.canApproveL1(approverId)) {

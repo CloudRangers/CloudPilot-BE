@@ -33,16 +33,6 @@ public class PkgRequestController {
         return ApiResponse.success(response);
     }
 
-    /** 2) [상태 확인] 내가 올린 모든 요청 (사원/팀장/부장 공통) */
-    @GetMapping("/requests/me")
-    public ApiResponse<List<PkgRequestResponse>> getMyRequests() {
-        Long userId = AuthUtil.getUserId();
-        if (userId == null) {
-            throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
-        }
-        List<PkgRequestResponse> list = packageService.getMyRequests(userId);
-        return ApiResponse.success(list);
-    }
     /** 7) [상세조회] 단일 요청 + 승인/반려 이력까지 모두 반환 */
     @GetMapping("/requests/{requestId}")
     public ApiResponse<PkgRequestDetailResponse> getRequestDetail(
@@ -59,37 +49,36 @@ public class PkgRequestController {
         return ApiResponse.success(detail);
     }
 
-
-
-
-    /** 3) [상태 확인] 내가 결재한 이력 (팀장: L1, 부장: FINAL) */
-    @GetMapping("/requests/history/me")
-    public ApiResponse<List<PkgRequestResponse>> getMyApprovalHistory() {
+    @GetMapping("/requests")
+    public ApiResponse<List<PkgRequestResponse>> getRequests(
+            @RequestParam(name = "view", defaultValue = "my") String view
+    ) {
         Long userId = AuthUtil.getUserId();
         if (userId == null) {
             throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
         }
-        List<PkgRequestResponse> list = packageService.getMyApprovalHistory(userId);
+
+        List<PkgRequestResponse> list;
+
+        switch (view) {
+            case "my" ->       // 내가 올린 요청
+                    list = packageService.getMyRequests(userId);
+            case "history" ->  // 내가 결재한 이력
+                    list = packageService.getMyApprovalHistory(userId);
+            case "todo" ->     // 지금 내가 결재해야 하는 것들
+                    list = packageService.getMyTodoApprovals(userId);
+            default ->
+                    throw new IllegalArgumentException("지원하지 않는 view 값입니다: " + view);
+        }
+
         return ApiResponse.success(list);
     }
 
-    /** 4) [To-do] 지금 내가 결재해야 하는 요청 목록
-     *   - 팀장 : 우리 팀 pending
-     *   - 부장 : 전체 l1_approved
-     */
-    @GetMapping("/requests/todo")
-    public ApiResponse<List<PkgRequestResponse>> getMyTodoApprovals() {
-        Long userId = AuthUtil.getUserId();
-        if (userId == null) {
-            throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
-        }
-        List<PkgRequestResponse> list = packageService.getMyTodoApprovals(userId);
-        return ApiResponse.success(list);
-    }
+
 
     /** 5) [팀장] L1 승인/반려 */
-    @PostMapping("/requests/{requestId}/l1")
-    public ApiResponse<PkgRequestResponse> handleL1Approval(
+    @PostMapping("/requests/{requestId}/approve")
+    public ApiResponse<PkgRequestResponse> approveOrRejectL1(
             @PathVariable Long requestId,
             @RequestBody PkgApprovalActionRequest body
     ) {
@@ -97,14 +86,14 @@ public class PkgRequestController {
         if (approverId == null) {
             throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
         }
-        PkgRequestResponse res =
-                packageService.handleL1Approval(requestId, approverId, body);
+        // 팀장 결재 처리
+        PkgRequestResponse res = packageService.handleL1Approval(requestId, approverId, body);
         return ApiResponse.success(res);
     }
 
     /** 6) [부장] 최종 승인/반려 */
-    @PostMapping("/requests/{requestId}/final")
-    public ApiResponse<PkgRequestResponse> handleFinalApproval(
+    @PostMapping("/requests/{requestId}/approve")
+    public ApiResponse<PkgRequestResponse> approveOrRejectFinal(
             @PathVariable Long requestId,
             @RequestBody PkgApprovalActionRequest body
     ) {
@@ -112,8 +101,8 @@ public class PkgRequestController {
         if (approverId == null) {
             throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
         }
-        PkgRequestResponse res =
-                packageService.handleFinalApproval(requestId, approverId, body);
+        // 부장 결재 처리
+        PkgRequestResponse res = packageService.handleFinalApproval(requestId, approverId, body);
         return ApiResponse.success(res);
     }
 }
