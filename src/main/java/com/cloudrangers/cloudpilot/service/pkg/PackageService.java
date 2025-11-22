@@ -125,15 +125,24 @@ public class PackageService {
      *  - reason: 승인/거절 사유 (pkg_approval.description에 저장)
      */
     @Transactional
-    public PkgRequestResponse approveOrReject(Long requestId, Long approverId, PkgApprovalActionRequest body) {
-        String step = body.getStep(); // "L1" or "FINAL"
-        if ("L1".equalsIgnoreCase(step)) {
-            return handleL1Approval(requestId, approverId, body);
-        } else if ("FINAL".equalsIgnoreCase(step)) {
+    public PkgRequestResponse approveOrReject(
+            Long requestId,
+            Long approverId,
+            PkgApprovalActionRequest body
+    ) {
+
+        // 부장 권한이 있으면 FINAL 처리
+        if (permissionChecker.canApproveFinal(approverId)) {
             return handleFinalApproval(requestId, approverId, body);
-        } else {
-            throw new IllegalArgumentException("Invalid step: " + step);
         }
+
+        // 팀장 권한이 있으면 L1 처리
+        if (permissionChecker.canApproveL1(approverId)) {
+            return handleL1Approval(requestId, approverId, body);
+        }
+
+        // 둘 다 아니면 권한 없음
+        throw new IllegalStateException("User has no approval permission: " + approverId);
     }
     @Transactional
     public PkgRequestResponse handleL1Approval(Long requestId, Long approverId, PkgApprovalActionRequest body) {

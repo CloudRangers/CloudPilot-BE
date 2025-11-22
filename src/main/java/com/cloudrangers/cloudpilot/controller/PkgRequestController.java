@@ -75,10 +75,9 @@ public class PkgRequestController {
     }
 
 
-
-    /** 5) [팀장] L1 승인/반려 */
+    /** 5) [팀장/부장 공통] 승인/반려 */
     @PostMapping("/requests/{requestId}/approve")
-    public ApiResponse<PkgRequestResponse> approveOrRejectL1(
+    public ApiResponse<PkgRequestResponse> approveOrReject(
             @PathVariable Long requestId,
             @RequestBody PkgApprovalActionRequest body
     ) {
@@ -86,23 +85,10 @@ public class PkgRequestController {
         if (approverId == null) {
             throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
         }
-        // 팀장 결재 처리
-        PkgRequestResponse res = packageService.handleL1Approval(requestId, approverId, body);
-        return ApiResponse.success(res);
-    }
 
-    /** 6) [부장] 최종 승인/반려 */
-    @PostMapping("/requests/{requestId}/approve")
-    public ApiResponse<PkgRequestResponse> approveOrRejectFinal(
-            @PathVariable Long requestId,
-            @RequestBody PkgApprovalActionRequest body
-    ) {
-        Long approverId = AuthUtil.getUserId();
-        if (approverId == null) {
-            throw new RuntimeException("인증 정보가 없습니다. 로그인 후 다시 시도해주세요.");
-        }
-        // 부장 결재 처리
-        PkgRequestResponse res = packageService.handleFinalApproval(requestId, approverId, body);
+        PkgRequestResponse res =
+                packageService.approveOrReject(requestId, approverId, body);
+
         return ApiResponse.success(res);
     }
 }
