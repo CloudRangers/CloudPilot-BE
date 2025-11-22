@@ -1,11 +1,9 @@
 package com.cloudrangers.cloudpilot.service.vm;
 
 import com.cloudrangers.cloudpilot.domain.provision.VmProvisionJob;
-import com.cloudrangers.cloudpilot.domain.vm.Nic;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
 import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage;
 import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage.InstanceInfo;
-import com.cloudrangers.cloudpilot.repository.vm.NicRepository;
 import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,12 +24,11 @@ import java.util.Map;
 public class VmProvisionService {
 
     private final VmInstanceRepository vmInstanceRepository;
-    private final NicRepository nicRepository;   // ⭐ NIC 저장용
     private final ObjectMapper objectMapper;
 
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
-     * vm_instance + nic 테이블에 저장.
+     * vm_instance 테이블에만 저장
      */
     @Transactional
     public void handleProvisionSuccess(VmProvisionJob job, ProvisionResultMessage result) {
@@ -44,9 +41,10 @@ public class VmProvisionService {
         for (InstanceInfo info : instances) {
             Instant now = Instant.now();
 
-            // =======================
-            // 1) vm_instance 저장
-            // =======================
+            // IP 결정 (팀 네트워크 IP 한 개)
+            String ip = resolveIp(info);
+
+            // vm_instance 저장
             VmInstance vm = VmInstance.builder()
                     .name(defaultString(info.getName(), "vm-" + job.getId()))
                     .providerType(defaultString(info.getProviderType(), "VSPHERE"))
@@ -63,37 +61,13 @@ public class VmProvisionService {
                     .updatedAt(now)
                     .updatedBy(job.getUserId())
                     .tags(buildTags(info))
+                    .ip(ip)
                     .build();
 
             VmInstance saved = vmInstanceRepository.save(vm);
 
-            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}",
-                    job.getId(), saved.getId(), saved.getName(), saved.getZoneId());
-
-            // =======================
-            // 2) NIC 정보 저장
-            // =======================
-
-            // Worker에서 넘어온 값: "172.16.0.10,172.16.0.11" 같은 문자열
-            String nicAddressesStr = info.getNicAddresses();
-            List<String> nicList = parseNicAddresses(nicAddressesStr);
-
-            if (!nicList.isEmpty()) {
-                for (String ip : nicList) {
-                    Nic nic = Nic.builder()
-                            .vmInstance(saved)
-                            .privateIp(ip)
-                            .build();
-
-                    nicRepository.save(nic);
-
-                    log.info("[VmProvisionService] NIC 저장: vmInstanceId={}, ip={}",
-                            saved.getId(), ip);
-                }
-            } else {
-                log.warn("[VmProvisionService] NIC 정보 없음: vmInstanceId={}, name={}",
-                        saved.getId(), saved.getName());
-            }
+            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}, ip={}",
+                    job.getId(), saved.getId(), saved.getName(), saved.getZoneId(), saved.getIp());
         }
     }
 
@@ -117,13 +91,11 @@ public class VmProvisionService {
             m.put("externalId", info.getExternalId());
         }
         if (info.getIpAddress() != null) {
-            m.put("ipAddress", info.getIpAddress()); // primary IP
+            m.put("ipAddress", info.getIpAddress());
         }
         if (info.getOsType() != null) {
             m.put("osType", info.getOsType());
         }
-
-        // nicAddresses는 문자열 그대로 저장 (예: "172.16.0.10,172.16.0.11")
         if (info.getNicAddresses() != null && !info.getNicAddresses().isBlank()) {
             m.put("nicAddresses", info.getNicAddresses());
         }
@@ -158,6 +130,24 @@ public class VmProvisionService {
             }
         }
         return result;
+    }
+
+    /**
+     * 팀 네트워크용 IP 결정 로직
+     * 1) ipAddress 가 있으면 그걸 사용
+     * 2) 없으면 nicAddresses 에서 첫 번째 IP 사용
+     */
+    private String resolveIp(InstanceInfo info) {
+        if (info.getIpAddress() != null && !info.getIpAddress().isBlank()) {
+            return info.getIpAddress().trim();
+        }
+
+        List<String> nicList = parseNicAddresses(info.getNicAddresses());
+        if (!nicList.isEmpty()) {
+            return nicList.get(0);
+        }
+
+        return null;
     }
 
     private String defaultString(String value, String def) {

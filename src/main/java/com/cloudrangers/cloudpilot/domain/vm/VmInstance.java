@@ -48,4 +48,7 @@ public class VmInstance {
     private Long updatedBy;
 
     private String tags;
+
+    @Column(name = "ip")
+    private String ip;
 }
