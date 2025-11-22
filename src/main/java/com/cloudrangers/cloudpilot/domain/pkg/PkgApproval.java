@@ -46,6 +46,9 @@ public class PkgApproval {
     @Column(name = "decided_at", nullable = false)
     private Instant decidedAt;
 
+    @Column(name = "description")
+    private String description;
+
     @PrePersist
     void onCreate() {
         if (decidedAt == null) decidedAt = Instant.now();

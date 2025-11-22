@@ -10,7 +10,6 @@ import java.util.Optional;
 
 public interface PkgApprovalRepository extends JpaRepository<PkgApproval, Long> {
 
-    List<PkgApproval> findByPkgRequest(PkgRequest request);
-
-    Optional<PkgApproval> findFirstByPkgRequestAndStep(PkgRequest request, PkgApprovalStep step);
+    List<PkgApproval> findByApprover_IdAndStep(Long approverId, PkgApprovalStep step);
+    List<PkgApproval> findByPkgRequest_IdOrderByDecidedAtAsc(Long requestId);
 }

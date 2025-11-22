@@ -9,7 +9,6 @@ public class PkgRequestCreateRequest {
 
     @NotBlank
     private String packageName;
-
     @NotBlank
     private String packageVer;
 
