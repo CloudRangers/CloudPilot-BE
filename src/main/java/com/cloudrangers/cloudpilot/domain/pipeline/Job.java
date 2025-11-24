@@ -16,7 +16,7 @@ import java.time.Instant;
         })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
-public class Job {
+public class  Job {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
