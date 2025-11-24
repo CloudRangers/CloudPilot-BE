@@ -3,9 +3,11 @@ package com.cloudrangers.cloudpilot.repository.pkg;
 import com.cloudrangers.cloudpilot.domain.pkg.PkgRequest;
 import com.cloudrangers.cloudpilot.enums.PkgRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface PkgRequestRepository extends JpaRepository<PkgRequest, Long> {
@@ -40,6 +42,22 @@ public interface PkgRequestRepository extends JpaRepository<PkgRequest, Long> {
             @Param("teamId") Long teamId,
             @Param("status") PkgRequestStatus status
     );
+    @Modifying
+    @Query("""
+       UPDATE PkgRequest p
+          SET p.status = :newStatus,
+              p.decidedAt = :decidedAt
+        WHERE p.id = :id
+          AND p.status = :expectedStatus
+       """)
+    int updateStatusIfMatches(
+            @Param("id") Long id,
+            @Param("expectedStatus") PkgRequestStatus expectedStatus,
+            @Param("newStatus") PkgRequestStatus newStatus,
+            @Param("decidedAt") Instant decidedAt
+    );
+
+
 
     /**
      * 부장(HEAD)용 To-do 목록

@@ -9,6 +9,7 @@ import com.cloudrangers.cloudpilot.service.pkg.PackageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import com.cloudrangers.cloudpilot.dto.response.PkgRequestDetailResponse;
+import jakarta.validation.Valid;
 
 
 import java.util.List;
@@ -23,7 +24,7 @@ public class PkgRequestController {
     /** 1) 패키지 설치 요청 생성 */
     @PostMapping("/requests")
     public ApiResponse<PkgRequestResponse> createRequest(
-            @RequestBody PkgRequestCreateRequest request
+            @RequestBody @Valid PkgRequestCreateRequest request
     ) {
         Long userId = AuthUtil.getUserId();
         if (userId == null) {
@@ -79,7 +80,7 @@ public class PkgRequestController {
     @PostMapping("/requests/{requestId}/approve")
     public ApiResponse<PkgRequestResponse> approveOrReject(
             @PathVariable Long requestId,
-            @RequestBody PkgApprovalActionRequest body
+            @RequestBody @Valid PkgApprovalActionRequest body
     ) {
         Long approverId = AuthUtil.getUserId();
         if (approverId == null) {

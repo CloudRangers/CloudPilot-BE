@@ -142,57 +142,80 @@ public class PackageService {
         }
 
         // 둘 다 아니면 권한 없음
-        throw new IllegalStateException("User has no approval permission: " + approverId);
+        throw new IllegalStateException("권한이 존재하지 않는 user: " + approverId);
     }
     @Transactional
     public PkgRequestResponse handleL1Approval(Long requestId, Long approverId, PkgApprovalActionRequest body) {
 
         if (!permissionChecker.canApproveL1(approverId)) {
-            throw new IllegalStateException("L1 approval not allowed for user=" + approverId);
+            throw new IllegalStateException("L1 승인 권한이 존재하지 않습니다. userId=" + approverId);
         }
 
+        // 우선 요청 엔티티는 읽어서, 승인 이력 작성용으로 사용
         PkgRequest request = getRequestOrThrow(requestId);
-
-        if (request.getStatus() != PkgRequestStatus.pending) {
-            throw new IllegalStateException("Only pending requests can be L1-approved or rejected");
-        }
 
         User approver = userRepository.findById(approverId)
                 .orElseThrow(() -> new EntityNotFoundException("Approver not found: " + approverId));
 
         String action = body.getAction();
-        String reason = body.getReason(); // nullable 일 수 있음
+        String reason = body.getReason(); // nullable 가능
+
+        Instant now = Instant.now();
 
         if ("approve".equalsIgnoreCase(action)) {
-            // 🔹 L1 승인
+            // 🔹 DB 조건부 UPDATE: pending → l1_approved 인 경우에만 1 row 업데이트
+            int updated = pkgRequestRepository.updateStatusIfMatches(
+                    requestId,
+                    PkgRequestStatus.pending,       // 기대 상태
+                    PkgRequestStatus.l1_approved,   // 바꿀 상태
+                    now
+            );
+
+            if (updated == 0) {
+                // 누가 먼저 처리했거나, 이미 상태가 바뀐 케이스
+                throw new IllegalStateException("이미 다른 승인자가 먼저 처리한 요청입니다. (L1)");
+            }
+
+            // 승인 이력 저장
             PkgApproval approval = PkgApproval.builder()
-                    .pkgRequest(request)                 // ✅ 빌더 메서드로 설정 (필드 직접 접근 X)
+                    .pkgRequest(request)
                     .step(PkgApprovalStep.L1)
                     .approver(approver)
                     .result(PkgApprovalResult.approved)
-                    .description(reason)                 // 승인/거절 사유
-                    .decidedAt(Instant.now())
+                    .description(reason)
+                    .decidedAt(now)
                     .build();
             pkgApprovalRepository.save(approval);
 
+            // 메모리 상 엔티티도 DB 상태와 맞춰 줌
             request.setStatus(PkgRequestStatus.l1_approved);
-            pkgRequestRepository.save(request);
+            request.setDecidedAt(now);
 
         } else if ("reject".equalsIgnoreCase(action)) {
-            // 🔹 L1 거절
+
+            int updated = pkgRequestRepository.updateStatusIfMatches(
+                    requestId,
+                    PkgRequestStatus.pending,       // pending인 경우에만 거절 가능
+                    PkgRequestStatus.rejected,
+                    now
+            );
+
+            if (updated == 0) {
+                throw new IllegalStateException("이미 다른 승인자가 먼저 처리한 요청입니다. (L1 거절)");
+            }
+
             PkgApproval approval = PkgApproval.builder()
                     .pkgRequest(request)
                     .step(PkgApprovalStep.L1)
                     .approver(approver)
                     .result(PkgApprovalResult.rejected)
                     .description(reason)
-                    .decidedAt(Instant.now())
+                    .decidedAt(now)
                     .build();
             pkgApprovalRepository.save(approval);
 
             request.setStatus(PkgRequestStatus.rejected);
-            request.setDecidedAt(Instant.now());
-            pkgRequestRepository.save(request);
+            request.setDecidedAt(now);
 
         } else {
             throw new IllegalArgumentException("Invalid action for L1: " + action);
@@ -200,6 +223,7 @@ public class PackageService {
 
         return PkgRequestResponse.from(request);
     }
+
 
     /**
      * 3) FINAL(부장) 승인/거절 공통 처리
@@ -211,42 +235,68 @@ public class PackageService {
             throw new IllegalStateException("Final approval not allowed for user=" + approverId);
         }
 
+        // 이 시점의 상태를 보고 유효한 상태인지 먼저 체크
         PkgRequest request = getRequestOrThrow(requestId);
 
         if (request.getStatus() != PkgRequestStatus.l1_approved
                 && request.getStatus() != PkgRequestStatus.pending) {
-            throw new IllegalStateException("Only pending or l1_approved can be finally approved/rejected");
+            throw new IllegalStateException("FINAL 승인/반려는 pending 또는 l1_approved 상태에서만 가능합니다.");
         }
 
         User approver = userRepository.findById(approverId)
-                .orElseThrow(() -> new EntityNotFoundException("Approver not found: " + approverId));
+                .orElseThrow(() -> new EntityNotFoundException("승인자를 찾을 수 없습니다: " + approverId));
 
         String action = body.getAction();
         String reason = body.getReason();
+        Instant now = Instant.now();
+
+        // 현재 읽은 상태를 expectedStatus로 사용
+        PkgRequestStatus currentStatus = request.getStatus();
 
         if ("approve".equalsIgnoreCase(action)) {
-            // 🔹 FINAL 승인
+
+            int updated = pkgRequestRepository.updateStatusIfMatches(
+                    requestId,
+                    currentStatus,              // 지금 읽은 상태와 동일할 때만 승인
+                    PkgRequestStatus.approved,  // 최종 승인
+                    now
+            );
+
+            if (updated == 0) {
+                throw new IllegalStateException("이미 다른 승인자가 먼저 처리한 요청입니다. (FINAL 승인)");
+            }
+
             PkgApproval approval = PkgApproval.builder()
                     .pkgRequest(request)
                     .step(PkgApprovalStep.FINAL)
                     .approver(approver)
                     .result(PkgApprovalResult.approved)
                     .description(reason)
-                    .decidedAt(Instant.now())
+                    .decidedAt(now)
                     .build();
             pkgApprovalRepository.save(approval);
 
             request.setStatus(PkgRequestStatus.approved);
-            request.setDecidedAt(Instant.now());
-            pkgRequestRepository.save(request);
+            request.setDecidedAt(now);
 
-            // TODO: 여기서 ans_run 만들어서 실제 Ansible 설치 작업 트리거
-            // ex) ansibleService.triggerInstall(request);
+            // TODO: 여기서 ans_run 트리거 등 실제 설치 작업 호출 가능
+            // ansibleService.triggerInstall(request);
 
         } else if ("reject".equalsIgnoreCase(action)) {
-            // 🔹 FINAL 거절
+
             if (request.getStatus() == PkgRequestStatus.rejected) {
-                throw new IllegalStateException("Already rejected");
+                throw new IllegalStateException("이미 거절된 요청입니다.");
+            }
+
+            int updated = pkgRequestRepository.updateStatusIfMatches(
+                    requestId,
+                    currentStatus,              // 현재 상태에서만 거절 처리
+                    PkgRequestStatus.rejected,
+                    now
+            );
+
+            if (updated == 0) {
+                throw new IllegalStateException("이미 다른 승인자가 먼저 처리한 요청입니다. (FINAL 거절)");
             }
 
             PkgApproval approval = PkgApproval.builder()
@@ -255,13 +305,12 @@ public class PackageService {
                     .approver(approver)
                     .result(PkgApprovalResult.rejected)
                     .description(reason)
-                    .decidedAt(Instant.now())
+                    .decidedAt(now)
                     .build();
             pkgApprovalRepository.save(approval);
 
             request.setStatus(PkgRequestStatus.rejected);
-            request.setDecidedAt(Instant.now());
-            pkgRequestRepository.save(request);
+            request.setDecidedAt(now);
 
         } else {
             throw new IllegalArgumentException("Invalid action for FINAL: " + action);
@@ -269,6 +318,7 @@ public class PackageService {
 
         return PkgRequestResponse.from(request);
     }
+
     @Transactional(readOnly = true)
     public List<PkgRequestResponse> getPendingRequestsByTeam(Long teamId) {
         // 팀 단위의 pending 요청들 조회 (팀장 화면 등에서 사용)
