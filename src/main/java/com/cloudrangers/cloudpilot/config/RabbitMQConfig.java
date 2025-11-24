@@ -22,18 +22,17 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RabbitMQConfig {
 
-    // ===== Job =====
+    // ===== Provision Job =====
     @Value("${rabbitmq.queue.provision.name:provision-jobs}")
     private String provisionQueueName;
 
     @Value("${rabbitmq.exchange.provision.name:provision-exchange}")
     private String provisionExchangeName;
 
-    // 토픽 확장성 (발행은 provision.create[.provider] 형태로 보냄)
     @Value("${rabbitmq.routing-key.provision.pattern:provision.#}")
     private String provisionRoutingPattern;
 
-    // ===== Result =====
+    // ===== Provision Result =====
     @Value("${rabbitmq.queue.result.name:provision-results}")
     private String resultQueueName;
 
@@ -43,7 +42,7 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.result.pattern:result.provision.#}")
     private String resultRoutingPattern;
 
-    // ===== DLX/DLQ =====
+    // ===== DLX / DLQ =====
     @Value("${rabbitmq.queue.dlq.name:provision-jobs.dlq}")
     private String dlqName;
 
@@ -53,14 +52,11 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.routing-key.dlq:provision.failed}")
     private String dlqRoutingKey;
 
-    // JSON 메시지 변환
+    // ===== JSON Converter =====
     @Bean
     public MessageConverter jsonMessageConverter() {
         ObjectMapper objectMapper = new ObjectMapper();
-
-        // Enum 대소문자 구분 X
         objectMapper.enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
-
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
@@ -69,15 +65,16 @@ public class RabbitMQConfig {
     }
 
     @Bean
-    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory,
-                                         MessageConverter jsonMessageConverter) {
+    public RabbitTemplate rabbitTemplate(
+            ConnectionFactory connectionFactory,
+            MessageConverter jsonMessageConverter
+    ) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(jsonMessageConverter);
         return rabbitTemplate;
     }
 
-
-    // Job Queue/Exchange/Binding
+    // ===== Provision Job Queue =====
     @Bean
     public Queue provisionQueue() {
         return QueueBuilder.durable(provisionQueueName)
@@ -94,11 +91,14 @@ public class RabbitMQConfig {
     @Bean
     public Binding provisionBinding(
             @Qualifier("provisionQueue") Queue provisionQueue,
-            @Qualifier("provisionExchange") TopicExchange provisionExchange) {
-        return BindingBuilder.bind(provisionQueue).to(provisionExchange).with(provisionRoutingPattern);
+            @Qualifier("provisionExchange") TopicExchange provisionExchange
+    ) {
+        return BindingBuilder.bind(provisionQueue)
+                .to(provisionExchange)
+                .with(provisionRoutingPattern);
     }
 
-    // Result Queue/Exchange/Binding
+    // ===== Provision Result Queue =====
     @Bean
     public Queue resultQueue() {
         return QueueBuilder.durable(resultQueueName).build();
@@ -112,11 +112,14 @@ public class RabbitMQConfig {
     @Bean
     public Binding resultBinding(
             @Qualifier("resultQueue") Queue resultQueue,
-            @Qualifier("resultExchange") TopicExchange resultExchange) {
-        return BindingBuilder.bind(resultQueue).to(resultExchange).with(resultRoutingPattern);
+            @Qualifier("resultExchange") TopicExchange resultExchange
+    ) {
+        return BindingBuilder.bind(resultQueue)
+                .to(resultExchange)
+                .with(resultRoutingPattern);
     }
 
-    // Dead Letter Exchange/Queue/Binding
+    // ===== Dead Letter =====
     @Bean
     public TopicExchange deadLetterExchange() {
         return new TopicExchange(dlxName, true, false);
@@ -130,19 +133,88 @@ public class RabbitMQConfig {
     @Bean
     public Binding deadLetterBinding(
             @Qualifier("deadLetterQueue") Queue deadLetterQueue,
-            @Qualifier("deadLetterExchange") TopicExchange deadLetterExchange) {
-        return BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(dlqRoutingKey);
+            @Qualifier("deadLetterExchange") TopicExchange deadLetterExchange
+    ) {
+        return BindingBuilder.bind(deadLetterQueue)
+                .to(deadLetterExchange)
+                .with(dlqRoutingKey);
     }
 
-    // Listener 컨테이너
+    // ===== Listener Container =====
     @Bean
     public SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
             ConnectionFactory connectionFactory,
             SimpleRabbitListenerContainerFactoryConfigurer configurer,
-            MessageConverter jsonMessageConverter) {
+            MessageConverter jsonMessageConverter
+    ) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         configurer.configure(factory, connectionFactory);
         factory.setMessageConverter(jsonMessageConverter);
         return factory;
+    }
+
+    // ================================================================
+    //           패키지 설치 Job Queue / Exchange / Binding
+    // ================================================================
+    @Value("${rabbitmq.queue.package.name:package-install-queue}")
+    private String packageQueueName;
+
+    @Value("${rabbitmq.exchange.package.name:package-install-exchange}")
+    private String packageExchangeName;
+
+    @Value("${rabbitmq.routing-key.package:package.install}")
+    private String packageRoutingKey;
+
+    @Bean
+    public Queue packageInstallQueue() {
+        return QueueBuilder.durable(packageQueueName).build();
+    }
+
+    @Bean
+    public TopicExchange packageInstallExchange() {
+        return new TopicExchange(packageExchangeName, true, false);
+    }
+
+    @Bean
+    public Binding packageInstallBinding(
+            @Qualifier("packageInstallQueue") Queue queue,
+            @Qualifier("packageInstallExchange") TopicExchange exchange
+    ) {
+        return BindingBuilder.bind(queue)
+                .to(exchange)
+                .with(packageRoutingKey);
+    }
+
+
+    // ================================================================
+    //           패키지 설치 Result Queue / Exchange / Binding
+    // ================================================================
+    @Value("${rabbitmq.queue.package-result.name:package-install-result-queue}")
+    private String packageResultQueueName;
+
+    @Value("${rabbitmq.exchange.package-result.name:package-install-result-exchange}")
+    private String packageResultExchangeName;
+
+    @Value("${rabbitmq.routing-key.package-result:package.install.result}")
+    private String packageResultRoutingKey;
+
+    @Bean
+    public Queue packageInstallResultQueue() {
+        return QueueBuilder.durable(packageResultQueueName).build();
+    }
+
+    @Bean
+    public TopicExchange packageInstallResultExchange() {
+        return new TopicExchange(packageResultExchangeName, true, false);
+    }
+
+    @Bean
+    public Binding packageInstallResultBinding(
+            @Qualifier("packageInstallResultQueue") Queue queue,
+            @Qualifier("packageInstallResultExchange") TopicExchange exchange
+    ) {
+        return BindingBuilder.bind(queue)
+                .to(exchange)
+                .with(packageResultRoutingKey);
     }
 }
