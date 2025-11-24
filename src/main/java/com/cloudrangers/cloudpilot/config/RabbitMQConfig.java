@@ -167,7 +167,10 @@ public class RabbitMQConfig {
 
     @Bean
     public Queue packageInstallQueue() {
-        return QueueBuilder.durable(packageQueueName).build();
+        return QueueBuilder.durable(packageQueueName)
+                .withArgument("x-dead-letter-exchange", dlxName)
+                .withArgument("x-dead-letter-routing-key", "package.install.failed")
+                .build();
     }
 
     @Bean
