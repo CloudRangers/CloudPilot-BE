@@ -13,8 +13,11 @@ import java.time.Instant;
                 @Index(name = "idx_tf_run_pipeline", columnList = "pipeline_id"),
                 @Index(name = "idx_tf_run_status", columnList = "status")
         })
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor @Builder
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class TfRun {
 
     @Id
@@ -23,14 +26,18 @@ public class TfRun {
 
     // N:1 (Pipeline:TfRun)
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "pipeline_id", nullable = false,
-            foreignKey = @ForeignKey(name = "fk_tf_run_pipeline"))
+    @JoinColumn(name = "pipeline_id", nullable = false)
     private Pipeline pipeline;
 
-    // 모듈/변수셋은 우선 ID로만
+    /** 실행에 사용되는 provider_account_id (DB 컬럼 그대로 매핑) */
+    @Column(name = "provider_account_id")
+    private Long providerAccountId;
+
+    /** 사용한 Terraform Module Version ID */
     @Column(name = "module_version_id", nullable = false)
     private Long moduleVersionId;
 
+    /** 사용한 Varset ID */
     @Column(name = "varset_id", nullable = false)
     private Long varsetId;
 
@@ -65,7 +72,12 @@ public class TfRun {
 
     @PrePersist
     void onCreate() {
-        if (updatedAt == null) updatedAt = Instant.now();
+        if (updatedAt == null) {
+            updatedAt = Instant.now();
+        }
+        if (startedAt == null) {
+            startedAt = Instant.now();
+        }
     }
 
     @PreUpdate

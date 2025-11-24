@@ -9,7 +9,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -52,6 +51,15 @@ public class ProvisionRequest {
     @Min(value = 10, message = "diskGb는 최소 10이어야 합니다")
     @Max(value = 10240, message = "diskGb는 최대 10240까지 가능합니다")
     private Integer diskGb;
+
+    // ===== 팀 정보 =====
+
+    /**
+     * VM이 속할 팀 ID (소유 팀)
+     * - 일반 팀원: 프론트에서 본인 팀 ID 자동 세팅
+     * - 팀이 없는 부장/관리자: 프론트에서 선택한 팀 ID
+     */
+    private Long teamId;
 
     // ===== 선택 필드 =====
 

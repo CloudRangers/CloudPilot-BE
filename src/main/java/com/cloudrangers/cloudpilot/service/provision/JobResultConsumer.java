@@ -1,9 +1,10 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
 import com.cloudrangers.cloudpilot.domain.provision.VmProvisionJob;
+import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage;
 import com.cloudrangers.cloudpilot.enums.VmProvisionStatus;
-import com.cloudrangers.cloudpilot.dto.response.ProvisionResponse;
 import com.cloudrangers.cloudpilot.repository.provision.ProvisionJobRepository;
+import com.cloudrangers.cloudpilot.service.vm.VmProvisionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -24,23 +26,30 @@ import java.util.Optional;
 public class JobResultConsumer {
 
     private final ProvisionJobRepository provisionJobRepository;
+    private final VmProvisionService vmProvisionService;
 
+    /**
+     * 워커가 result-exchange -> provision-results 로 보내는 메시지 처리
+     * - LOG : 테라폼 로그를 API 서버 로그에 남기고, Job 상태를 running 으로 전환
+     * - SUCCESS : Job 상태 succeeded + vm_instance 저장
+     * - ERROR : Job 상태 failed
+     */
     @RabbitListener(queues = "${rabbitmq.queue.result.name:provision-results}")
     @Transactional
     public void consumeResult(
-            @Payload ProvisionResponse result,
+            @Payload ProvisionResultMessage result,
             Message amqpMessage,
             @Headers Map<String, Object> headers
     ) {
         final String corr = extractCorrelationId(amqpMessage, headers);
         final String jobIdStr = firstNonBlank(
-                corr,
+                result.getJobId(),
                 asString(headers.get("jobId")),
-                result.getJobId()
+                corr
         ).orElse(null);
 
         if (jobIdStr == null) {
-            log.error("Result dropped: missing jobId/correlationId. headers={}, payload={}",
+            log.error("Result dropped: jobId/correlationId 없음. headers={}, payload={}",
                     safeHeaderPreview(headers), safePayloadPreview(result));
             return;
         }
@@ -53,8 +62,14 @@ public class JobResultConsumer {
             return;
         }
 
-        log.info("Result received: jobId={}, corr={}, status={}, vmId={}",
-                jobId, corr, result.getStatus(), result.getVmResourceId());
+        log.info("[Result] jobId={}, corr={}, eventType={}, status={}, step={}, msg={}",
+                jobId,
+                corr,
+                result.getEventType(),
+                result.getStatus(),
+                result.getStep(),
+                truncate(result.getMessage(), 200)
+        );
 
         try {
             VmProvisionJob job = provisionJobRepository.findById(jobId).orElse(null);
@@ -64,11 +79,26 @@ public class JobResultConsumer {
                 return;
             }
 
-            switch (String.valueOf(result.getStatus())) {
-                case "RUNNING" -> handleRunningStatus(job, result);
-                case "SUCCEEDED" -> handleSuccessStatus(job, result);
-                case "FAILED" -> handleFailedStatus(job, result);
-                default -> log.warn("Unexpected status for job {}: {}", jobId, result.getStatus());
+            // 첫 이벤트가 오면 queued → running 으로 변경
+            if (job.getStatus() == VmProvisionStatus.queued) {
+                job.setStatus(VmProvisionStatus.running);
+                if (job.getStartedAt() == null) {
+                    if (result.getTimestamp() != null) {
+                        job.setStartedAt(result.getTimestamp().toInstant());
+                    } else {
+                        job.setStartedAt(Instant.now());
+                    }
+                }
+            }
+
+            ProvisionResultMessage.EventType eventType = resolveEventType(result);
+
+            switch (eventType) {
+                case LOG    -> handleLogEvent(job, result);
+                case SUCCESS -> handleSuccessEvent(job, result);
+                case ERROR   -> handleErrorEvent(job, result);
+                default      -> log.warn("Unknown eventType for job {}: {} (status={})",
+                        jobId, eventType, result.getStatus());
             }
 
             provisionJobRepository.save(job);
@@ -78,7 +108,114 @@ public class JobResultConsumer {
         }
     }
 
+    /**
+     * 워커에서 AmqpRejectAndDontRequeueException 던져서
+     * 원본 job 메시지가 DLQ(provision-jobs.dlq)로 간 경우 처리.
+     */
+    @RabbitListener(queues = "${rabbitmq.queue.dlq.name:provision-jobs.dlq}")
+    @Transactional
+    public void consumeDeadLetter(
+            @Payload byte[] body,
+            Message amqpMessage,
+            @Headers Map<String, Object> headers
+    ) {
+        String payload = new String(body, StandardCharsets.UTF_8);
+        final String jobIdStr = firstNonBlank(
+                asString(headers.get("jobId")),
+                extractCorrelationId(amqpMessage, headers)
+        ).orElse(null);
+
+        log.error("[DLQ] Dead-lettered job message 수신. jobId={}, headers={}, payload={}",
+                jobIdStr, safeHeaderPreview(headers), truncate(payload, 500));
+
+        if (jobIdStr == null) {
+            return;
+        }
+
+        Long jobId;
+        try {
+            jobId = Long.parseLong(jobIdStr);
+        } catch (NumberFormatException e) {
+            log.error("[DLQ] Invalid jobId format (expected Long): {}", jobIdStr);
+            return;
+        }
+
+        VmProvisionJob job = provisionJobRepository.findById(jobId).orElse(null);
+        if (job == null) {
+            log.warn("[DLQ] Job not found. jobId={}", jobId);
+            return;
+        }
+
+        // 이미 성공이면 건들지 않음
+        if (job.getStatus() != VmProvisionStatus.succeeded) {
+            job.setStatus(VmProvisionStatus.failed);
+            if (job.getErrorMessage() == null || job.getErrorMessage().isBlank()) {
+                job.setErrorMessage("Job message moved to DLQ. payload=" + truncate(payload, 300));
+            }
+            if (job.getFinishedAt() == null) {
+                job.setFinishedAt(Instant.now());
+            }
+            provisionJobRepository.save(job);
+        }
+    }
+
+    // ====== 내부 핸들러 ======
+
+    private ProvisionResultMessage.EventType resolveEventType(ProvisionResultMessage result) {
+        if (result.getEventType() != null) {
+            return result.getEventType();
+        }
+        String status = result.getStatus();
+        if (status == null) {
+            return ProvisionResultMessage.EventType.LOG;
+        }
+        String up = status.toUpperCase(Locale.ROOT);
+        return switch (up) {
+            case "RUNNING", "LOG" -> ProvisionResultMessage.EventType.LOG;
+            case "SUCCEEDED", "SUCCESS" -> ProvisionResultMessage.EventType.SUCCESS;
+            case "FAILED", "ERROR" -> ProvisionResultMessage.EventType.ERROR;
+            default -> ProvisionResultMessage.EventType.LOG;
+        };
+    }
+
+    private void handleLogEvent(VmProvisionJob job, ProvisionResultMessage result) {
+        String step = result.getStep() != null ? result.getStep() : "unknown";
+        String line = result.getMessage();
+        log.info("[Job:{}][TF-{}] {}", job.getId(), step, line);
+        // 필요하면 나중에 별도 로그 테이블에 적재하는 로직 추가 가능
+    }
+
+    private void handleSuccessEvent(VmProvisionJob job, ProvisionResultMessage result) {
+        job.setStatus(VmProvisionStatus.succeeded);
+        if (result.getTimestamp() != null) {
+            job.setFinishedAt(result.getTimestamp().toInstant());
+        } else if (job.getFinishedAt() == null) {
+            job.setFinishedAt(Instant.now());
+        }
+
+        // vm_instance 저장
+        vmProvisionService.handleProvisionSuccess(job, result);
+
+        int count = result.getInstances() != null ? result.getInstances().size() : 0;
+        log.info("Job succeeded: jobId={}, instances={}", job.getId(), count);
+    }
+
+    private void handleErrorEvent(VmProvisionJob job, ProvisionResultMessage result) {
+        final String err = (result.getMessage() == null || result.getMessage().isBlank())
+                ? "Worker reported failure (no message)"
+                : result.getMessage();
+
+        job.setStatus(VmProvisionStatus.failed);
+        job.setErrorMessage(err);
+        if (job.getFinishedAt() == null) {
+            job.setFinishedAt(Instant.now());
+        }
+
+        log.error("Job failed: jobId={}, error={}", job.getId(), err);
+    }
+
     // ===== helpers =====
+
     private String extractCorrelationId(Message m, Map<String, Object> headers) {
         Object h = headers.get("correlation_id");
         String v = asString(h);
@@ -98,46 +235,38 @@ public class JobResultConsumer {
         return String.valueOf(o);
     }
 
-    private Optional<String> firstNonBlank(String... vals) {
-        for (String v : vals) if (v != null && !v.isBlank()) return Optional.of(v);
+    private Optional<String> firstNonBlank(String... values) {
+        if (values == null) return Optional.empty();
+        for (String v : values) {
+            if (v != null && !v.isBlank()) return Optional.of(v);
+        }
         return Optional.empty();
     }
 
-    private void handleRunningStatus(VmProvisionJob job, ProvisionResponse result) {
-        job.setStatus(VmProvisionStatus.running);
-        if (result.getStartedAt() != null) job.setStartedAt(result.getStartedAt());
-        else if (job.getStartedAt() == null) job.setStartedAt(Instant.now());
-        log.info("Job started: {}", job.getId());
-    }
-
-    private void handleSuccessStatus(VmProvisionJob job, ProvisionResponse result) {
-        // vmResourceId는 DDL 상 job 테이블에 저장 공간 없음 → 필요하면 별도 테이블에 저장 고려
-        job.setStatus(VmProvisionStatus.succeeded);
-        if (result.getCompletedAt() != null) job.setFinishedAt(result.getCompletedAt());
-        else job.setFinishedAt(Instant.now());
-        log.info("Job succeeded: {}, VM ID: {}", job.getId(), result.getVmResourceId());
-    }
-
-    private void handleFailedStatus(VmProvisionJob job, ProvisionResponse result) {
-        final String err = (result.getErrorMessage() == null || result.getErrorMessage().isBlank())
-                ? "Worker reported failure (no message)" : result.getErrorMessage();
-        job.setStatus(VmProvisionStatus.failed);
-        job.setErrorMessage(err);
-        job.setFinishedAt(Instant.now());
-        log.error("Job failed: {}, Error: {}", job.getId(), err);
+    private String truncate(String s, int max) {
+        if (s == null) return null;
+        if (s.length() <= max) return s;
+        return s.substring(0, max) + "...";
     }
 
     private String safeHeaderPreview(Map<String, Object> headers) {
         try {
             return "{correlation_id=" + headers.get("correlation_id")
                     + ", jobId=" + headers.get("jobId") + "}";
-        } catch (Exception e) { return "{preview-failed}"; }
+        } catch (Exception e) {
+            return "{preview-failed}";
+        }
     }
 
-    private String safePayloadPreview(ProvisionResponse p) {
+    private String safePayloadPreview(ProvisionResultMessage p) {
         try {
-            return "ProvisionResponse{jobId=" + p.getJobId() + ", status=" + p.getStatus()
-                    + ", vmResourceId=" + p.getVmResourceId() + "}";
-        } catch (Exception e) { return "{payload-preview-failed}"; }
+            return "ProvisionResultMessage{jobId=" + p.getJobId()
+                    + ", eventType=" + p.getEventType()
+                    + ", status=" + p.getStatus()
+                    + ", step=" + p.getStep()
+                    + ", message=" + truncate(p.getMessage(), 100) + "}";
+        } catch (Exception e) {
+            return "{payload-preview-failed}";
+        }
     }
 }
