@@ -20,7 +20,7 @@ public class AuthUtil {
     }
 
     /** 🔥 현재 로그인한 사용자 empno */
-    public static String getEmpno() {
+    public static Long getEmpno() {
         CustomUserDetails p = getPrincipal();
         return p != null ? p.getEmpno() : null;
     }

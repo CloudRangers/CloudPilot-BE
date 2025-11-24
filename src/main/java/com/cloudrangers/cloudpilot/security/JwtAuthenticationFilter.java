@@ -35,11 +35,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = resolveToken(request);
 
+        // 🔥 1) 쿠키 혹은 Authorization 헤더에서 추출된 토큰 출력
+        log.info("🍪 [JWT-FILTER] Extracted Token = {}", token);
+
         if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
+        // 블랙리스트 체크
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Token is blacklisted");
@@ -47,16 +51,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         try {
+            // 🔥 2) 토큰 검증 전에 어떤 토큰을 다루는지 표시
+            log.info("🟢 [JWT-FILTER] Validating Token = {}", token);
+
             if (jwtProvider.validateToken(token)) {
 
                 Claims claims = jwtProvider.parseClaims(token);
 
                 Long userId = claims.get("userId", Long.class);
-                String empno = claims.getSubject();
+                Long empno = claims.get("empno", Long.class);
+                String username = claims.get("username", String.class);
                 String role = claims.get("role", String.class);
                 Long teamId = claims.get("teamId", Long.class);
+                String teamName = claims.get("teamName", String.class);
 
-                CustomUserDetails principal = new CustomUserDetails(userId, empno, role, teamId);
+                CustomUserDetails principal = new CustomUserDetails(
+                        userId,
+                        empno,
+                        username,
+                        role,
+                        teamId,
+                        teamName
+                );
 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
@@ -65,23 +81,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 principal.getAuthorities()
                         );
 
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                authentication.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request)
+                );
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
         } catch (JwtExpiredException e) {
+            log.warn("⚠️ [JWT-FILTER] Token expired");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Access token expired");
             return;
 
         } catch (JwtInvalidException e) {
+
+            // 🔥 3) 잘못된 토큰 원인 전체 출력
+            log.error("❌ [JWT-FILTER] Invalid Token Reason = {}", e.getMessage());
+
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid token");
             return;
 
         } catch (Exception e) {
-            log.error("JWT filter error: {}", e.getMessage());
+            log.error("🔥 [JWT-FILTER] Unexpected error: {}", e.getMessage());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid authorization");
             return;
@@ -92,11 +115,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private String resolveToken(HttpServletRequest request) {
 
+        // 1) Authorization 헤더 체크
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
             return header.substring(7);
         }
 
+        // 2) 쿠키 체크
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {
