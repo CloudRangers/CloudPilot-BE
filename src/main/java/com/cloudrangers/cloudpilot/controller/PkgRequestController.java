@@ -5,7 +5,7 @@ import com.cloudrangers.cloudpilot.dto.request.PkgApprovalActionRequest;
 import com.cloudrangers.cloudpilot.dto.request.PkgRequestCreateRequest;
 import com.cloudrangers.cloudpilot.dto.response.PkgRequestResponse;
 import com.cloudrangers.cloudpilot.security.AuthUtil;
-import com.cloudrangers.cloudpilot.service.pkg.PackageService;
+import com.cloudrangers.cloudpilot.service.pkg.PkgRequestService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import com.cloudrangers.cloudpilot.dto.response.PkgRequestDetailResponse;
@@ -19,7 +19,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PkgRequestController {
 
-    private final PackageService packageService;
+    private final PkgRequestService packageService;
 
     /** 1) 패키지 설치 요청 생성 */
     @PostMapping("/requests")
