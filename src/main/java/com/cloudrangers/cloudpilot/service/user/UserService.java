@@ -16,4 +16,5 @@ public interface UserService {
     Map<String, Object> buildClaims(String empno);
 
     String refresh(HttpServletRequest request);
+    LoginResponse getMyInfo(HttpServletRequest request);
 }

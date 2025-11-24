@@ -35,11 +35,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = resolveToken(request);
 
+        // 1) 토큰 추출 로그
+        log.info("🍪 [JWT-FILTER] Extracted Token = {}", token);
+
         if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
+        // 2) 블랙리스트 체크
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Token is blacklisted");
@@ -47,16 +51,32 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         try {
+            log.info("🟢 [JWT-FILTER] Validating Token = {}", token);
+
             if (jwtProvider.validateToken(token)) {
 
                 Claims claims = jwtProvider.parseClaims(token);
 
                 Long userId = claims.get("userId", Long.class);
-                String empno = claims.getSubject();
-                String role = claims.get("role", String.class);
-                Long teamId = claims.get("teamId", Long.class);
+                Long empno = claims.get("empno", Long.class);
+                String username = claims.get("username", String.class);
 
-                CustomUserDetails principal = new CustomUserDetails(userId, empno, role, teamId);
+                String roleCode = claims.get("role", String.class);
+                String roleName = claims.get("roleName", String.class);
+
+                Long teamId = claims.get("teamId", Long.class);
+                String teamName = claims.get("teamName", String.class);
+
+                // 🔥 CustomUserDetails 개선된 생성자 사용
+                CustomUserDetails principal = new CustomUserDetails(
+                        userId,
+                        empno,
+                        username,
+                        roleCode,
+                        roleName,
+                        teamId,
+                        teamName
+                );
 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
@@ -65,23 +85,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 principal.getAuthorities()
                         );
 
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                authentication.setDetails(
+                        new WebAuthenticationDetailsSource().buildDetails(request)
+                );
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }
 
         } catch (JwtExpiredException e) {
+            log.warn("⚠️ [JWT-FILTER] Token expired");
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Access token expired");
             return;
 
         } catch (JwtInvalidException e) {
+            log.error("❌ [JWT-FILTER] Invalid Token Reason = {}", e.getMessage());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid token");
             return;
 
         } catch (Exception e) {
-            log.error("JWT filter error: {}", e.getMessage());
+            log.error("🔥 [JWT-FILTER] Unexpected error: {}", e.getMessage());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid authorization");
             return;
@@ -92,11 +116,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private String resolveToken(HttpServletRequest request) {
 
+        // 1) Authorization 헤더 우선
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
             return header.substring(7);
         }
 
+        // 2) access_token 쿠키 체크
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {

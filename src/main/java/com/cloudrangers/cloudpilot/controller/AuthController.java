@@ -34,13 +34,22 @@ public class AuthController {
         String accessToken = jwtProvider.generateAccessToken(empno, claims);
         String refreshToken = jwtProvider.generateRefreshToken(empno);
 
+        // ⭐ 로컬 개발환경: SameSite=None + secure=false
         ResponseCookie accessCookie = ResponseCookie.from("access_token", accessToken)
-                .httpOnly(true).secure(true).sameSite("Strict")
-                .path("/").maxAge(60 * 30).build();
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(60 * 30)
+                .build();
 
         ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
-                .httpOnly(true).secure(true).sameSite("Strict")
-                .path("/").maxAge(60L * 60 * 24 * 14).build();
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(60L * 60 * 24 * 14)
+                .build();
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
@@ -55,8 +64,8 @@ public class AuthController {
 
         ResponseCookie newAccessCookie = ResponseCookie.from("access_token", newAccessToken)
                 .httpOnly(true)
-                .secure(true)
-                .sameSite("Strict")
+                .secure(false)
+                .sameSite("Lax")
                 .path("/")
                 .maxAge(60 * 30)
                 .build();
@@ -72,10 +81,20 @@ public class AuthController {
         userService.logout(request);
 
         ResponseCookie clearAccess = ResponseCookie.from("access_token", "")
-                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict").build();
+                .path("/")
+                .maxAge(0)
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .build();
 
         ResponseCookie clearRefresh = ResponseCookie.from("refresh_token", "")
-                .path("/").maxAge(0).httpOnly(true).secure(true).sameSite("Strict").build();
+                .path("/")
+                .maxAge(0)
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .build();
 
         response.addHeader("Set-Cookie", clearAccess.toString());
         response.addHeader("Set-Cookie", clearRefresh.toString());
@@ -83,25 +102,8 @@ public class AuthController {
         return ApiResponse.success(null);
     }
 
-    @PostMapping("/password-reset")
-    public ApiResponse<Void> sendPasswordReset(@RequestParam String email) {
-        userService.sendPasswordResetEmail(email);
-        return ApiResponse.success(null);
-    }
-
-    @PostMapping("/password-reset/confirm")
-    public ApiResponse<Void> confirmPasswordReset(
-            @RequestParam String token,
-            @RequestParam String newPassword) {
-        userService.confirmPasswordReset(token, newPassword);
-        return ApiResponse.success(null);
-    }
-
-    @PostMapping("/password")
-    public ApiResponse<Void> changePassword(
-            @RequestParam String currentPassword,
-            @RequestParam String newPassword) {
-        userService.changePassword(currentPassword, newPassword);
-        return ApiResponse.success(null);
+    @GetMapping("/me")
+    public ApiResponse<LoginResponse> getMyInfo(HttpServletRequest request) {
+        return ApiResponse.success(userService.getMyInfo(request));
     }
 }

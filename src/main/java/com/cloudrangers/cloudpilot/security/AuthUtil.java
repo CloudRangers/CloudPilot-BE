@@ -20,7 +20,7 @@ public class AuthUtil {
     }
 
     /** 🔥 현재 로그인한 사용자 empno */
-    public static String getEmpno() {
+    public static Long getEmpno() {
         CustomUserDetails p = getPrincipal();
         return p != null ? p.getEmpno() : null;
     }
@@ -28,7 +28,7 @@ public class AuthUtil {
     /** 🔥 현재 로그인한 사용자 역할 (HEAD / LEADER / MEMBER) */
     public static String getRole() {
         CustomUserDetails p = getPrincipal();
-        return p != null ? p.getRole() : null;
+        return p != null ? p.getRoleCode() : null;
     }
 
     /** 🔥 현재 로그인한 사용자 teamId */
