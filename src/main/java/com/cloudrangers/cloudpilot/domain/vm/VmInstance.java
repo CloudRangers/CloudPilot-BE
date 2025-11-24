@@ -52,3 +52,4 @@ public class VmInstance {
     @Column(name = "ip")
     private String ip;
 }
+
