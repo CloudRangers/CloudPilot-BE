@@ -14,27 +14,33 @@ public class CustomUserDetails implements UserDetails {
     private final Long userId;
     private final Long empno;
     private final String username;
-    private final String role;
+
+    private final String roleCode;   // 🔥 기존 role → roleCode로 명확히 이름 변경
+    private final String roleName;   // 🔥 새로 추가됨
+
     private final Long teamId;
     private final String teamName;
 
     public CustomUserDetails(Long userId,
                              Long empno,
                              String username,
-                             String role,
+                             String roleCode,
+                             String roleName,
                              Long teamId,
                              String teamName) {
+
         this.userId = userId;
         this.empno = empno;
         this.username = username;
-        this.role = role;
+        this.roleCode = roleCode;
+        this.roleName = roleName;
         this.teamId = teamId;
         this.teamName = teamName;
     }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return List.of(new SimpleGrantedAuthority("ROLE_" + role));
+        return List.of(new SimpleGrantedAuthority("ROLE_" + roleCode));
     }
 
     @Override

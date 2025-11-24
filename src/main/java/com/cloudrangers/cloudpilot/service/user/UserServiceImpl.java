@@ -9,6 +9,7 @@ import com.cloudrangers.cloudpilot.exception.badrequest.InvalidTokenException;
 import com.cloudrangers.cloudpilot.exception.notfound.UserNotFoundException;
 import com.cloudrangers.cloudpilot.repository.user.UserRepository;
 import com.cloudrangers.cloudpilot.security.JwtProvider;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,15 @@ public class UserServiceImpl implements UserService {
         var userRole = getHighestUserRole(user);
         var role = userRole.getRole();
         var team = userRole.getTeam();
+
+        Map<String, Object> claims = buildClaims(user.getEmpno().toString());
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getEmpno().toString(),
+                claims
+        );
+        String refreshToken = jwtProvider.generateRefreshToken(
+                user.getEmpno().toString()
+        );
 
         return LoginResponse.builder()
                 .username(user.getUsername())
@@ -180,18 +190,21 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findWithRolesByEmpno(Long.valueOf(empno))
                 .orElseThrow(() -> new UserNotFoundException(empno));
 
-        var userRole = getHighestUserRole(user);
-        var role = userRole.getRole();
-        var team = userRole.getTeam();
+        UserRole userRole = getHighestUserRole(user);
 
         Map<String, Object> claims = new HashMap<>();
+
         claims.put("userId", user.getId());
-        claims.put("role", role.getCode());
-        claims.put("teamId", team != null ? team.getId() : null);
-        claims.put("team", team != null ? team.getName() : "GLOBAL");
+        claims.put("empno", user.getEmpno());
+        claims.put("username", user.getUsername());
+        claims.put("role", userRole.getRole().getCode());
+        claims.put("roleName", userRole.getRole().getName());
+        claims.put("teamId", userRole.getTeam() != null ? userRole.getTeam().getId() : null);
+        claims.put("teamName", userRole.getTeam() != null ? userRole.getTeam().getName() : "GLOBAL");
 
         return claims;
     }
+
 
     private UserRole getHighestUserRole(User user) {
         return user.getUserRoles().stream()
@@ -213,4 +226,31 @@ public class UserServiceImpl implements UserService {
     public void updateEmail(Long userId, String newEmail) {
         // TODO
     }
+
+    @Override
+    public LoginResponse getMyInfo(HttpServletRequest request) {
+
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new InvalidTokenException("인증 정보가 없습니다.");
+        }
+
+        // 🔥 JwtAuthenticationFilter에서 저장한 CustomUserDetails 읽기
+        Object principalObj = authentication.getPrincipal();
+
+        if (!(principalObj instanceof com.cloudrangers.cloudpilot.security.CustomUserDetails principal)) {
+            throw new InvalidTokenException("유효하지 않은 인증 정보입니다.");
+        }
+
+        return LoginResponse.builder()
+                .username(principal.getUsername())
+                .roleCode(principal.getRoleCode())
+                .roleName(principal.getRoleName())
+                .teamId(principal.getTeamId())
+                .teamName(principal.getTeamName())
+                .build();
+    }
+
+
 }

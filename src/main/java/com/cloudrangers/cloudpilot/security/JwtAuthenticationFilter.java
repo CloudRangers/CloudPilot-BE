@@ -35,7 +35,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = resolveToken(request);
 
-        // 🔥 1) 쿠키 혹은 Authorization 헤더에서 추출된 토큰 출력
+        // 1) 토큰 추출 로그
         log.info("🍪 [JWT-FILTER] Extracted Token = {}", token);
 
         if (token == null) {
@@ -43,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 블랙리스트 체크
+        // 2) 블랙리스트 체크
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Token is blacklisted");
@@ -51,7 +51,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         try {
-            // 🔥 2) 토큰 검증 전에 어떤 토큰을 다루는지 표시
             log.info("🟢 [JWT-FILTER] Validating Token = {}", token);
 
             if (jwtProvider.validateToken(token)) {
@@ -61,15 +60,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Long userId = claims.get("userId", Long.class);
                 Long empno = claims.get("empno", Long.class);
                 String username = claims.get("username", String.class);
-                String role = claims.get("role", String.class);
+
+                String roleCode = claims.get("role", String.class);
+                String roleName = claims.get("roleName", String.class);
+
                 Long teamId = claims.get("teamId", Long.class);
                 String teamName = claims.get("teamName", String.class);
 
+                // 🔥 CustomUserDetails 개선된 생성자 사용
                 CustomUserDetails principal = new CustomUserDetails(
                         userId,
                         empno,
                         username,
-                        role,
+                        roleCode,
+                        roleName,
                         teamId,
                         teamName
                 );
@@ -95,10 +99,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
 
         } catch (JwtInvalidException e) {
-
-            // 🔥 3) 잘못된 토큰 원인 전체 출력
             log.error("❌ [JWT-FILTER] Invalid Token Reason = {}", e.getMessage());
-
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Invalid token");
             return;
@@ -115,13 +116,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private String resolveToken(HttpServletRequest request) {
 
-        // 1) Authorization 헤더 체크
+        // 1) Authorization 헤더 우선
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith("Bearer ")) {
             return header.substring(7);
         }
 
-        // 2) 쿠키 체크
+        // 2) access_token 쿠키 체크
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {
