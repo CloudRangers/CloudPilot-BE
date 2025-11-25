@@ -39,13 +39,16 @@ public class UserServiceImpl implements UserService {
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
 
+        // 1) 사용자 조회
         User user = userRepository.findWithRolesByEmpno(request.getEmpno())
                 .orElseThrow(() -> new UserNotFoundException(request.getEmpno()));
 
+        // 2) 비밀번호 검증
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new InvalidPasswordException();
         }
 
+        // 3) 최고 권한(role) + 팀 구하기
         var userRole = getHighestUserRole(user);
         var role = userRole.getRole();
         var team = userRole.getTeam();
@@ -60,6 +63,8 @@ public class UserServiceImpl implements UserService {
         );
 
         return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .username(user.getUsername())
                 .roleCode(role.getCode())
                 .roleName(role.getName())
