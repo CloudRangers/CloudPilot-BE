@@ -35,11 +35,34 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
+                        // (A) 👇 vCenter 모니터링 완전 공개 — 최상단에 둬야 함
+                        .requestMatchers("/monitor/**").permitAll()
+
+                        // 1. 로그인/인증 관련 공개
                         .requestMatchers("/auth/**").permitAll()
+
+                        // 3. Actuator health/info/prometheus 공개
+                        .requestMatchers(
+                                "/actuator/health",
+                                "/actuator/info",
+                                "/actuator/prometheus"
+                        ).permitAll()
+
+                        // 4. 🔹 Prometheus 모니터링 API 개발 단계에서는 전체 허용
+                        .requestMatchers("/api/monitoring/**").permitAll()
+
+                        // 5. 관리자 전용
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+
+                        // 6. 패키지 승인 HEAD/LEADER 전용
                         .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
+
+                        .requestMatchers("/ops/v1/vms/**").permitAll()
+
+                        // 7. 나머지는 인증 필요
                         .anyRequest().authenticated()
                 )
+
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()));
 

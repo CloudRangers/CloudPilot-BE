@@ -38,18 +38,32 @@ public class UserServiceImpl implements UserService {
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
 
+        // 1) 사용자 조회
         User user = userRepository.findWithRolesByEmpno(request.getEmpno())
                 .orElseThrow(() -> new UserNotFoundException(request.getEmpno()));
 
+        // 2) 비밀번호 검증
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new InvalidPasswordException();
         }
 
+        // 3) 최고 권한(role) + 팀 구하기
         var userRole = getHighestUserRole(user);
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
+        // 4) JWT 클레임 생성 (이미 있는 헬퍼 재사용)
+        String empnoStr = String.valueOf(user.getEmpno());
+        Map<String, Object> claims = buildClaims(empnoStr);
+
+        // 5) 액세스 / 리프레시 토큰 발급
+        String accessToken = jwtProvider.generateAccessToken(empnoStr, claims);
+        String refreshToken = jwtProvider.generateRefreshToken(empnoStr);
+
+        // 6) LoginResponse에 토큰 + 기본 정보 넣어서 반환
         return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .username(user.getUsername())
                 .roleCode(role.getCode())
                 .roleName(role.getName())
