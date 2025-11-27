@@ -28,7 +28,7 @@ public class VmProvisionService {
 
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
-     * vm_instance 테이블에만 저장
+     * vm_instance 테이블에 저장
      */
     @Transactional
     public void handleProvisionSuccess(VmProvisionJob job, ProvisionResultMessage result) {
@@ -41,12 +41,14 @@ public class VmProvisionService {
         for (InstanceInfo info : instances) {
             Instant now = Instant.now();
 
-            // IP 결정 (팀 네트워크 IP 한 개)
+            // VM 이름 한 번 계산 (null/blank 시 fallback)
+            String name = defaultString(info.getName(), "vm-" + job.getId());
+
+            // 대표 IP (vm_instance.ip와 동일하게 사용)
             String ip = resolveIp(info);
 
-            // vm_instance 저장
             VmInstance vm = VmInstance.builder()
-                    .name(defaultString(info.getName(), "vm-" + job.getId()))
+                    .name(name)
                     .providerType(defaultString(info.getProviderType(), "VSPHERE"))
                     .zoneId(resolveZoneId(info, job))
                     .lifecycle("running")
@@ -60,7 +62,7 @@ public class VmProvisionService {
                     .createdBy(job.getUserId())
                     .updatedAt(now)
                     .updatedBy(job.getUserId())
-                    .tags(buildTags(info))
+                    .tags(buildTags(info, name, ip))
                     .ip(ip)
                     .build();
 
@@ -71,6 +73,9 @@ public class VmProvisionService {
         }
     }
 
+    /**
+     * InstanceInfo 또는 Job 에서 zoneId 결정
+     */
     private Long resolveZoneId(InstanceInfo info, VmProvisionJob job) {
         if (info.getZoneId() != null) {
             return info.getZoneId();
@@ -82,22 +87,41 @@ public class VmProvisionService {
     }
 
     /**
-     * vm_instance.tags 필드에 externalId / ip / osType / nicAddresses 등 JSON 저장
+     * vm_instance.tags 필드에 저장할 통일된 태그 구조
+     *
+     * {
+     *   "externalId": "vm-473",
+     *   "vmName": "Vmprovision-db-ip-test123123",
+     *   "primaryIp": "172.16.5.109",
+     *   "nicIps": ["172.16.5.109"],
+     *   "osType": "ubuntu"
+     * }
      */
-    private String buildTags(InstanceInfo info) {
+    private String buildTags(InstanceInfo info, String vmName, String primaryIp) {
         Map<String, Object> m = new LinkedHashMap<>();
 
-        if (info.getExternalId() != null) {
-            m.put("externalId", info.getExternalId());
+        // 1) vSphere VM ID (MoRef 또는 UUID)
+        if (info.getExternalId() != null && !info.getExternalId().isBlank()) {
+            m.put("externalId", info.getExternalId().trim());
         }
-        if (info.getIpAddress() != null) {
-            m.put("ipAddress", info.getIpAddress());
+
+        // 2) VM 이름 (CloudPilot 상 이름과 동일)
+        m.put("vmName", vmName);
+
+        // 3) 대표 IP (vm_instance.ip와 동일)
+        if (primaryIp != null && !primaryIp.isBlank()) {
+            m.put("primaryIp", primaryIp.trim());
         }
-        if (info.getOsType() != null) {
-            m.put("osType", info.getOsType());
+
+        // 4) NIC 별 IP 리스트
+        List<String> nicIps = parseNicAddresses(info.getNicAddresses());
+        if (!nicIps.isEmpty()) {
+            m.put("nicIps", nicIps);
         }
-        if (info.getNicAddresses() != null && !info.getNicAddresses().isBlank()) {
-            m.put("nicAddresses", info.getNicAddresses());
+
+        // 5) OS 타입
+        if (info.getOsType() != null && !info.getOsType().isBlank()) {
+            m.put("osType", info.getOsType().trim());
         }
 
         if (m.isEmpty()) {
@@ -133,7 +157,7 @@ public class VmProvisionService {
     }
 
     /**
-     * 팀 네트워크용 IP 결정 로직
+     * 팀 네트워크용 대표 IP 결정 로직
      * 1) ipAddress 가 있으면 그걸 사용
      * 2) 없으면 nicAddresses 에서 첫 번째 IP 사용
      */
