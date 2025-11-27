@@ -17,4 +17,9 @@ public class PackageDef {
     private String name;
 
     private String description;
+
+    @Column(nullable = false)
+    private String version;
+
+    private String arch;
 }
