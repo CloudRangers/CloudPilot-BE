@@ -220,4 +220,33 @@ public class RabbitMQConfig {
                 .to(exchange)
                 .with(packageResultRoutingKey);
     }
+
+    // === Package Install Progress Queue / Exchange / Binding ===
+
+    @Bean
+    public Queue progressQueue(
+            @Value("${rabbitmq.queue.package-install-progress.name}") String name
+    ) {
+        return QueueBuilder.durable(name).build();
+    }
+
+    @Bean
+    public TopicExchange progressExchange(
+            @Value("${rabbitmq.exchange.package-install-progress.name}") String name
+    ) {
+        return new TopicExchange(name, true, false);
+    }
+
+    @Bean
+    public Binding progressBinding(
+            @Qualifier("progressQueue") Queue queue,
+            @Qualifier("progressExchange") TopicExchange exchange,
+            @Value("${rabbitmq.routing-key.package-install-progress.pattern}") String routingKey
+    ) {
+        return BindingBuilder
+                .bind(queue)
+                .to(exchange)
+                .with(routingKey);
+    }
+
 }
