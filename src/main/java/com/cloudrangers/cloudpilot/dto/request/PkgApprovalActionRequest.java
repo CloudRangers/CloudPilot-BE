@@ -12,8 +12,6 @@ import lombok.Setter;
 @Setter
 public class PkgApprovalActionRequest {
     @NotBlank
-    private String step;
-    @NotBlank
     private String action;  // approve / reject
     private String reason;  // 승인/반려 사유
 }
