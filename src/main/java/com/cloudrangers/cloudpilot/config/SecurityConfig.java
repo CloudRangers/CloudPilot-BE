@@ -39,7 +39,20 @@ public class SecurityConfig {
                         .requestMatchers("/auth/me").authenticated()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
+
+                        // ⭐ OPTIONS Preflight 허용
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // ⭐ 리스트 조회는 공개
+                        .requestMatchers("/api/packages").permitAll()
+                        .requestMatchers("/vms").permitAll()
+
+                        // ⭐🔥 SSE는 인증 제외 → 반드시 추가
+                        .requestMatchers("/sse/**").permitAll()
+
+                        // ⭐ 설치 요청은 로그인 필요!
+                        .requestMatchers(HttpMethod.POST, "/packages/install").authenticated()
+
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
@@ -52,14 +65,20 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOriginPatterns(List.of("http://localhost:3000"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+
+        // ⭐ Authorization 명시적으로 추가 — 매우 중요!!
+        config.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Requested-With"));
+
         config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of("Set-Cookie"));
+
+        // ⭐ Authorization, Set-Cookie 모두 노출
+        config.setExposedHeaders(List.of("Set-Cookie", "Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/sse/**", config);
         return source;
     }
 
