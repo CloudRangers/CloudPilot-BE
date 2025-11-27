@@ -1,23 +1,29 @@
 package com.cloudrangers.cloudpilot.service.vm;
 
+import com.cloudrangers.cloudpilot.domain.catalog.OsImage;
 import com.cloudrangers.cloudpilot.dto.request.VmSearchCondition;
 import com.cloudrangers.cloudpilot.dto.response.VmStatusResponse;
-import com.cloudrangers.cloudpilot.dto.response.VmDetailResponse;   // ✅ 추가
+import com.cloudrangers.cloudpilot.dto.response.VmDetailResponse;
+import com.cloudrangers.cloudpilot.repository.catalog.OsImageRepository; // Added this import
 import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;        // ✅ 추가
+import org.springframework.transaction.annotation.Transactional;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class VmQueryService {
 
     private final VmInstanceRepository vmInstanceRepository;
+    private final OsImageRepository osImageRepository; // Added this
 
     public PageResponse<VmStatusResponse> getVms(
             int page,
@@ -50,7 +56,22 @@ public class VmQueryService {
                 .build();
 
         var pageResult = vmInstanceRepository.search(condition, pageable, sort);
-        List<VmStatusResponse> items = pageResult.map(VmStatusResponse::fromEntity).toList();
+
+        List<Long> osImageIds = pageResult.getContent().stream()
+                .map(vm -> vm.getOsImageId())
+                .filter(osImageId -> osImageId != null)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<Long, OsImage> osImageMap = osImageRepository.findAllById(osImageIds).stream()
+                .collect(Collectors.toMap(OsImage::getId, osImage -> osImage));
+
+        List<VmStatusResponse> items = pageResult.getContent().stream()
+                .map(vm -> {
+                    OsImage osImage = vm.getOsImageId() != null ? osImageMap.get(vm.getOsImageId()) : null;
+                    return VmStatusResponse.fromEntity(vm, osImage);
+                })
+                .collect(Collectors.toList());
 
         return PageResponse.of(items, pageResult.getNumber(), pageResult.getSize(), pageResult.getTotalElements());
     }
@@ -62,11 +83,12 @@ public class VmQueryService {
             Long ownerUserId, Long teamId
     ) {
         return getVms(page, size, providerType, zoneId, status, powerState, name, ownerUserId, teamId,
-                null, null, null, null);
+                null, null, Collections.emptyMap(), null);
     }
     public VmDetailResponse getVmDetail(Long vmId) {
         var vm = vmInstanceRepository.findById(vmId)
                 .orElseThrow(() -> new IllegalArgumentException("VM not found: " + vmId));
+        // Also fetch osImage for detail if needed, or join in repository
         return VmDetailResponse.fromEntity(vm);
     }
     @Transactional
