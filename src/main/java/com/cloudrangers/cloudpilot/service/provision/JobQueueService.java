@@ -1,13 +1,22 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
+import com.cloudrangers.cloudpilot.domain.pipeline.TfRun;
+import com.cloudrangers.cloudpilot.domain.provision.VmProvisionItem;
+import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
 import com.cloudrangers.cloudpilot.dto.message.ProvisionJobMessage;
+import com.cloudrangers.cloudpilot.enums.TfRunAction;
+import com.cloudrangers.cloudpilot.enums.TfRunStatus;
+import com.cloudrangers.cloudpilot.repository.pipeline.TfRunRepository;
+import com.cloudrangers.cloudpilot.repository.provision.VmProvisionItemRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.*;
 
 @Service
@@ -16,7 +25,9 @@ import java.util.*;
 public class JobQueueService {
 
     private final RabbitTemplate rabbitTemplate;
-    private final JdbcTemplate jdbcTemplate; // Spring Boot JPA 사용 시 이미 들어옴
+    private final JdbcTemplate jdbcTemplate;
+    private final TfRunRepository tfRunRepository;  // ✅ 추가
+    private final VmProvisionItemRepository vmProvisionItemRepository;  // ✅ 추가
 
     @Value("${rabbitmq.exchange.provision.name:provision-exchange}")
     private String exchangeName;
@@ -24,6 +35,10 @@ public class JobQueueService {
     @Value("${rabbitmq.routing-key.provision.base:provision.create}")
     private String baseRoutingKey;
 
+    // ========================================
+    // ⭐ 수정: VM 생성 - TfRun 생성 추가
+    // ========================================
+    @Transactional
     public void pushJob(ProvisionJobMessage msg, boolean highPriority) {
         // 0) 기본값 보정
         normalize(msg);
@@ -31,16 +46,40 @@ public class JobQueueService {
         // 1) 템플릿 Resolve (os_image)
         resolveTemplateFromOsImage(msg);
 
-        // 2) 라우팅키
-        final String routingKey = buildRoutingKey(msg);
+        // ✅ 2) TfRun 레코드 생성
+        TfRun tfRun = createTfRun(msg);
+
+        // ✅ 3) provisionItemId가 있으면 연결
+        if (msg.getAdditionalConfig() != null) {
+            Object itemIdObj = msg.getAdditionalConfig().get("provisionItemId");
+            if (itemIdObj != null) {
+                Long provisionItemId = Long.parseLong(String.valueOf(itemIdObj));
+
+                VmProvisionItem item = vmProvisionItemRepository.findById(provisionItemId)
+                        .orElse(null);
+
+                if (item != null) {
+                    item.setTfRunId(tfRun.getId());
+                    vmProvisionItemRepository.save(item);
+                    log.info("✓ VmProvisionItem linked to TfRun: itemId={}, tfRunId={}",
+                            provisionItemId, tfRun.getId());
+                }
+            }
+
+            // tfRunId를 메시지에 추가
+            msg.getAdditionalConfig().put("tfRunId", tfRun.getId());
+        }
+
+        // 4) 라우팅키
+        final String routingKey = buildRoutingKey(msg, "create");
 
         try {
             if (msg.getJobId() == null || msg.getJobId().isBlank()) {
                 msg.setJobId(UUID.randomUUID().toString());
             }
 
-            log.info("Publishing job: jobId={}, exchange={}, rk={}, provider={}, zone={}, template(item={}, moid={})",
-                    msg.getJobId(), exchangeName, routingKey,
+            log.info("Publishing job: jobId={}, tfRunId={}, exchange={}, rk={}, provider={}, zone={}, template(item={}, moid={})",
+                    msg.getJobId(), tfRun.getId(), exchangeName, routingKey,
                     msg.getProviderType(), msg.getZoneId(),
                     msg.getTemplate() != null ? msg.getTemplate().getItemName() : null,
                     msg.getTemplate() != null ? msg.getTemplate().getTemplateMoid() : null
@@ -53,6 +92,7 @@ public class JobQueueService {
                     m -> {
                         m.getMessageProperties().setCorrelationId(msg.getJobId());
                         m.getMessageProperties().setHeader("jobId", msg.getJobId());
+                        m.getMessageProperties().setHeader("tfRunId", tfRun.getId());  // ✅ 추가
                         m.getMessageProperties().setContentType("application/json");
                         return m;
                     }
@@ -60,16 +100,233 @@ public class JobQueueService {
 
         } catch (Exception e) {
             log.error("Rabbit publish failed: {}", e.getMessage(), e);
+
+            // TfRun 실패 처리
+            tfRun.setStatus(TfRunStatus.failed);
+            tfRun.setFinishedAt(Instant.now());
+            tfRunRepository.save(tfRun);
+
             throw e;
         }
     }
 
-    private String buildRoutingKey(ProvisionJobMessage msg) {
-        String providerLower = String.valueOf(msg.getProviderType()).toLowerCase(Locale.ROOT);
-        return baseRoutingKey + "." + providerLower; // e.g., provision.create.vsphere
+    // ========================================
+    // ⭐ 수정: VM 삭제 - state_uri 조회 및 전달
+    // ========================================
+    /**
+     * VM 삭제 Job을 RabbitMQ에 전송
+     *
+     * @param jobId Job ID (UUID)
+     * @param vm 삭제할 VM 인스턴스
+     * @param requestedBy 요청자 User ID
+     */
+    @Transactional
+    public void pushDeleteJob(String jobId, VmInstance vm, Long requestedBy) {
+        try {
+            // ✅ 1. vm_instance → vm_provision_item → tf_run 조회
+            TfRun originalTfRun = findOriginalTfRun(vm);
+
+            if (originalTfRun == null) {
+                log.warn("⚠️ No TfRun found for VM deletion: vmId={}, vmName={}",
+                        vm.getId(), vm.getName());
+            }
+
+            // ✅ 2. 새 TfRun 레코드 생성 (destroy용)
+            TfRun destroyTfRun = TfRun.builder()
+                    .workspace(vm.getName())
+                    .action(TfRunAction.destroy)
+                    .status(TfRunStatus.running)
+                    .stateBackend("local")
+                    .startedAt(Instant.now())
+                    .updatedAt(Instant.now())
+                    .build();
+
+            destroyTfRun = tfRunRepository.save(destroyTfRun);
+
+            // ✅ 람다에서 사용할 final 변수
+            final Long finalTfRunId = destroyTfRun.getId();
+
+            log.info("✓ TfRun created for destroy: id={}, workspace={}",
+                    finalTfRunId, destroyTfRun.getWorkspace());
+
+            // ✅ 3. ProvisionJobMessage 생성 (stateUri 포함)
+            ProvisionJobMessage msg = buildDestroyMessage(
+                    jobId,
+                    vm,
+                    requestedBy,
+                    finalTfRunId,
+                    originalTfRun != null ? originalTfRun.getStateUri() : null
+            );
+
+            // 4. 라우팅 키 생성 (provision.destroy.vsphere)
+            String routingKey = buildRoutingKey(msg, "destroy");
+
+            log.info("📤 Publishing destroy job: jobId={}, tfRunId={}, vmId={}, vmName={}, stateUri={}, exchange={}, routingKey={}",
+                    jobId, finalTfRunId, vm.getId(), vm.getName(),
+                    originalTfRun != null ? originalTfRun.getStateUri() : "null",
+                    exchangeName, routingKey);
+
+            // 5. RabbitMQ로 전송
+            rabbitTemplate.convertAndSend(
+                    exchangeName,
+                    routingKey,
+                    msg,
+                    m -> {
+                        m.getMessageProperties().setCorrelationId(jobId);
+                        m.getMessageProperties().setHeader("jobId", jobId);
+                        m.getMessageProperties().setHeader("tfRunId", finalTfRunId);  // ✅ final 변수 사용
+                        m.getMessageProperties().setHeader("action", "destroy");
+                        m.getMessageProperties().setContentType("application/json");
+                        return m;
+                    }
+            );
+
+            log.info("✅ Destroy job published successfully: jobId={}, tfRunId={}",
+                    jobId, finalTfRunId);
+
+        } catch (Exception e) {
+            log.error("❌ Failed to publish destroy job: jobId={}, vmId={}",
+                    jobId, vm.getId(), e);
+            throw new RuntimeException("Failed to enqueue VM deletion job", e);
+        }
     }
 
-    // ---------- 내부 유틸 ----------
+    // ========================================
+    // ⭐ 새로 추가: TfRun 관련 헬퍼 메서드들
+    // ========================================
+
+    /**
+     * VM 생성 시 TfRun 레코드 생성
+     */
+    private TfRun createTfRun(ProvisionJobMessage msg) {
+        TfRun tfRun = TfRun.builder()
+                .workspace(msg.getVmName())
+                .action(TfRunAction.apply)
+                .status(TfRunStatus.running)
+                .stateBackend("local")
+                .startedAt(Instant.now())
+                .updatedAt(Instant.now())
+                .build();
+
+        tfRun = tfRunRepository.save(tfRun);
+
+        log.info("✓ TfRun created: id={}, workspace={}, action={}",
+                tfRun.getId(), tfRun.getWorkspace(), tfRun.getAction());
+
+        return tfRun;
+    }
+
+    /**
+     * VM 삭제 시 원본 TfRun 조회
+     * vm_instance → vm_provision_item → tf_run
+     */
+    private TfRun findOriginalTfRun(VmInstance vm) {
+        // 1. vm.provisionItemId로 VmProvisionItem 조회
+        Long provisionItemId = vm.getProvisionItemId();
+
+        if (provisionItemId == null) {
+            log.warn("⚠️ VM has no provisionItemId: vmId={}", vm.getId());
+            return null;
+        }
+
+        // 2. VmProvisionItem에서 tfRunId 조회
+        VmProvisionItem item = vmProvisionItemRepository.findById(provisionItemId)
+                .orElse(null);
+
+        if (item == null || item.getTfRunId() == null) {
+            log.warn("⚠️ VmProvisionItem has no tfRunId: itemId={}", provisionItemId);
+            return null;
+        }
+
+        // 3. TfRun 조회
+        TfRun tfRun = tfRunRepository.findById(item.getTfRunId())
+                .orElse(null);
+
+        if (tfRun == null) {
+            log.warn("⚠️ TfRun not found: tfRunId={}", item.getTfRunId());
+            return null;
+        }
+
+        log.info("✓ Found original TfRun: tfRunId={}, stateUri={}",
+                tfRun.getId(), tfRun.getStateUri());
+
+        return tfRun;
+    }
+
+    // ========================================
+    // Private 헬퍼 메서드들
+    // ========================================
+
+    /**
+     * ⭐ 수정: action에 따라 라우팅 키 생성
+     * - create: provision.create.vsphere
+     * - destroy: provision.destroy.vsphere
+     */
+    private String buildRoutingKey(ProvisionJobMessage msg, String action) {
+        String providerLower = String.valueOf(msg.getProviderType()).toLowerCase(Locale.ROOT);
+
+        // baseRoutingKey = "provision.create"
+        // → "provision" + "." + action + "." + provider
+        String baseWithoutAction = baseRoutingKey.replace(".create", "");
+        return baseWithoutAction + "." + action + "." + providerLower;
+    }
+
+    /**
+     * ⭐ 수정: Terraform destroy를 위한 ProvisionJobMessage 생성
+     */
+    private ProvisionJobMessage buildDestroyMessage(
+            String jobId,
+            VmInstance vm,
+            Long requestedBy,
+            Long tfRunId,  // ✅ 추가
+            String stateUri  // ✅ 추가
+    ) {
+        ProvisionJobMessage msg = new ProvisionJobMessage();
+
+        // 기본 정보
+        msg.setJobId(jobId);
+        msg.setAction("destroy");  // ⭐ 핵심: Terraform destroy 실행
+        msg.setProviderType(vm.getProviderType());
+        msg.setZoneId(vm.getZoneId().intValue());
+
+        // VM 정보
+        msg.setVmName(vm.getName());
+        msg.setVmCount(1);  // 삭제는 항상 단일 VM
+
+        // 리소스 스펙 (삭제 시에는 참고용)
+        msg.setCpuCores(vm.getVcpu());
+        msg.setMemoryGb(vm.getMemoryMb() != null ? vm.getMemoryMb() / 1024 : null);
+        msg.setDiskGb(vm.getRootDiskGb());
+
+        // 사용자 컨텍스트
+        msg.setUserId(requestedBy);
+        msg.setTeamId(vm.getTeamId());
+
+        // ✅ 추가 설정 (Terraform State URI 전달)
+        Map<String, Object> additionalConfig = new LinkedHashMap<>();
+        additionalConfig.put("vmId", vm.getId());
+        additionalConfig.put("operation", "destroy");
+        additionalConfig.put("requestedBy", requestedBy);
+        additionalConfig.put("tfRunId", tfRunId);  // ✅ 추가
+
+        if (stateUri != null && !stateUri.isBlank()) {
+            additionalConfig.put("stateUri", stateUri);  // ✅ 핵심!
+            log.info("✓ State URI added to destroy message: {}", stateUri);
+        } else {
+            log.warn("⚠️ No state URI available for destroy operation");
+        }
+
+        msg.setAdditionalConfig(additionalConfig);
+
+        log.debug("🔨 Built destroy message: jobId={}, vmName={}, action={}, tfRunId={}",
+                jobId, vm.getName(), msg.getAction(), tfRunId);
+
+        return msg;
+    }
+
+    // ========================================
+    // 기존 메서드들 (변경 없음)
+    // ========================================
 
     private void normalize(ProvisionJobMessage msg) {
         if (msg.getJobId() == null || msg.getJobId().isBlank()) {
@@ -109,22 +366,12 @@ public class JobQueueService {
 
     private boolean blank(String s) { return s == null || s.isBlank(); }
 
-    /**
-     * os_image에서 템플릿을 찾아 msg.template 채움.
-     * - 1순위: code = "family-version-variant-arch"
-     * - 2순위: family/version 토큰 LIKE
-     *
-     * 주의: DB zone_id는 SMALLINT → 쿼리 파라미터는 int로 전달
-     * 메시지의 zoneId가 Long이든 Integer든 intValue()로 안전 변환
-     */
     private void resolveTemplateFromOsImage(ProvisionJobMessage msg) {
         if (msg.getTemplate() != null
                 && (!blank(msg.getTemplate().getItemName()) || !blank(msg.getTemplate().getTemplateMoid()))) {
-            // 이미 채워져 있으면 그대로 사용
             return;
         }
 
-        // ★ zoneId를 int로 통일
         Integer zoneIdInt = requireZoneIdInt(msg);
 
         String family  = safeLower(msg.getOs().getFamily());
@@ -134,7 +381,6 @@ public class JobQueueService {
 
         String code = (family + "-" + version + "-" + variant + "-" + arch);
 
-        // 1) code 정확 매칭
         List<Map<String, Object>> exact = jdbcTemplate.queryForList("""
             SELECT id, code, name, template_name, template_moid, template_datastore, os_family, os_version, guest_id
               FROM os_image
@@ -144,7 +390,6 @@ public class JobQueueService {
 
         Map<String, Object> row = !exact.isEmpty() ? exact.get(0) : null;
 
-        // 2) family/version 토큰 검색
         if (row == null) {
             String famLike = "%" + family + "%";
             String verLike = "%" + version + "%";
@@ -171,7 +416,6 @@ public class JobQueueService {
         t.setGuestId(          (String) row.get("guest_id"));
         msg.setTemplate(t);
 
-        // 참고: 추적 용도로 additionalConfig에 기록(선택)
         if (msg.getAdditionalConfig() == null) {
             msg.setAdditionalConfig(new LinkedHashMap<>());
         }
@@ -180,12 +424,10 @@ public class JobQueueService {
     }
 
     private Integer requireZoneIdInt(ProvisionJobMessage msg) {
-        // ProvisionJobMessage의 zoneId가 Long로 선언되어 있어도 int로 안전 변환
-        Object z = msg.getZoneId(); // Long/Integer 모두 처리
+        Object z = msg.getZoneId();
         if (z == null) throw new IllegalArgumentException("zoneId is required");
         if (z instanceof Integer i) return i;
         if (z instanceof Long l)    return Math.toIntExact(l);
-        // 혹시 문자열 등으로 올 경우 대비
         return Integer.parseInt(String.valueOf(z));
     }
 

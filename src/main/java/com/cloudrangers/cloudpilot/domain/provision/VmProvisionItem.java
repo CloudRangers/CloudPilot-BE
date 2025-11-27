@@ -12,7 +12,8 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(name = "vm_provision_item",
         indexes = {
-                @Index(name = "idx_provision_item_job", columnList = "provision_job_id")
+                @Index(name = "idx_provision_item_job", columnList = "provision_job_id"),
+                @Index(name = "idx_provision_item_tf_run", columnList = "tf_run_id")  // ✅ 추가
         })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
@@ -27,6 +28,9 @@ public class VmProvisionItem {
     @JoinColumn(name = "provision_job_id", nullable = false,
             foreignKey = @ForeignKey(name = "fk_vm_provision_item_job"))
     private VmProvisionJob provisionJob;
+
+    @Column(name = "tf_run_id")
+    private Long tfRunId;
 
     // 외래키는 우선 ID로만
     @Column(name = "os_image_id", nullable = false)

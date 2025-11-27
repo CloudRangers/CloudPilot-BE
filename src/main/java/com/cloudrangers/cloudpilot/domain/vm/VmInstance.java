@@ -18,6 +18,9 @@ public class VmInstance {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "provision_item_id")
+    private Long provisionItemId;
+
     private String name;           // VM 이름
     private String providerType;   // AWS / VSPHERE
     private Long zoneId;           // Zone 참조

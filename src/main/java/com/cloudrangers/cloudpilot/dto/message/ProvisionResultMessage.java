@@ -31,6 +31,10 @@ public class ProvisionResultMessage {
     // SUCCESS일 때만 채우는 VM 정보 (여러 개 가능)
     private List<InstanceInfo> instances;
 
+    // ✅ 추가: Terraform State 관리
+    private Long tfRunId;          // tf_run 테이블 PK
+    private String stateUri;       // Terraform state 파일 경로
+
     public ProvisionResultMessage() {}
 
     // 예전 코드 호환용 생성자
@@ -67,6 +71,14 @@ public class ProvisionResultMessage {
     public List<InstanceInfo> getInstances() { return instances; }
     public void setInstances(List<InstanceInfo> instances) { this.instances = instances; }
 
+    // ✅ 추가: tfRunId getter/setter
+    public Long getTfRunId() { return tfRunId; }
+    public void setTfRunId(Long tfRunId) { this.tfRunId = tfRunId; }
+
+    // ✅ 추가: stateUri getter/setter
+    public String getStateUri() { return stateUri; }
+    public void setStateUri(String stateUri) { this.stateUri = stateUri; }
+
     @Override
     public String toString() {
         return "ProvisionResultMessage{" +
@@ -78,6 +90,8 @@ public class ProvisionResultMessage {
                 ", step='" + step + '\'' +
                 ", timestamp=" + timestamp +
                 ", instances=" + instances +
+                ", tfRunId=" + tfRunId +  // ✅ 추가
+                ", stateUri='" + stateUri + '\'' +  // ✅ 추가
                 '}';
     }
 

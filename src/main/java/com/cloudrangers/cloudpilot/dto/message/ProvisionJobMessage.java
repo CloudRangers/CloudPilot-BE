@@ -16,8 +16,9 @@ public class ProvisionJobMessage {
 
     // ===== 공통/식별 =====
     private String jobId;
-    private Object providerType;     // "VSPHERE" 등 (Enum/문자열 허용)
-    private Integer zoneId;
+    private String action;          // "apply" | "destroy" 등
+    private Object providerType;    // "VSPHERE" 등 (Enum/문자열 허용)
+    private Long zoneId;            // 워커 DTO와 맞추기 위해 Long 사용
 
     // ===== 호출자 컨텍스트(워커 로그/추적용) =====
     private Long userId;
@@ -48,9 +49,6 @@ public class ProvisionJobMessage {
     // ===== API 원본 요청 스냅샷(재시도/감사용) =====
     private ProvisionRequest request;  // 워커 DTO에 없더라도 JSON 역직렬화 시 무시됨
 
-    // ===== 워크플로 액션 =====
-    private String action; // "apply" | "destroy" 등
-
     // ===== CL/OS/초기화(앞으로 확장용; 워커는 unknown 무시) =====
     private TemplateRef    template;      // CL 템플릿 메타
     private OsSpec         os;            // OS 선택
@@ -58,6 +56,7 @@ public class ProvisionJobMessage {
     private PropertiesSpec properties;    // cloud-init/Windows customize
 
     // ---------- Nested Types ----------
+
     @Data
     public static class TemplateRef {
         private String itemName;           // os_image.template_name
@@ -65,6 +64,7 @@ public class ProvisionJobMessage {
         private String templateDatastore;  // os_image.template_datastore
         private String guestId;            // os_image.guest_id
         private String contentLibraryName; // 선택
+        private String uuid;               // 템플릿 UUID (워커 DTO와 정합성용, 선택)
     }
 
     @Data
@@ -85,7 +85,7 @@ public class ProvisionJobMessage {
         @Data
         public static class Ipv4 {
             private String address;
-            private Integer prefix;
+            private Integer prefix;   // CIDR prefix (예: 24)
             private String gateway;
         }
     }

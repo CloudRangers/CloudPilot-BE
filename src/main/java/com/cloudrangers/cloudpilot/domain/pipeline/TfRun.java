@@ -25,8 +25,9 @@ public class TfRun {
     private Long id;
 
     // N:1 (Pipeline:TfRun)
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "pipeline_id", nullable = false)
+    // ✅ optional = true로 변경 (VM 프로비저닝에서는 Pipeline 없이 사용)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pipeline_id")
     private Pipeline pipeline;
 
     /** 실행에 사용되는 provider_account_id (DB 컬럼 그대로 매핑) */
@@ -34,11 +35,11 @@ public class TfRun {
     private Long providerAccountId;
 
     /** 사용한 Terraform Module Version ID */
-    @Column(name = "module_version_id", nullable = false)
+    @Column(name = "module_version_id")
     private Long moduleVersionId;
 
     /** 사용한 Varset ID */
-    @Column(name = "varset_id", nullable = false)
+    @Column(name = "varset_id")
     private Long varsetId;
 
     @Column(name = "workspace", length = 200)
