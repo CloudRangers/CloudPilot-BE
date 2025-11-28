@@ -29,53 +29,93 @@ public class VmProvisionService {
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
      * vm_instance 테이블에 저장
+     *
+     * - tf_run_id  : 워커가 result.tfRunId에 넣어준 값 (없으면 null)
+     * - state_uri  : BE에서 jobId 기준으로 생성 (/tmp/terraform/{jobId}/terraform.tfstate)
      */
     @Transactional
     public void handleProvisionSuccess(VmProvisionJob job, ProvisionResultMessage result) {
         List<InstanceInfo> instances = result.getInstances();
+
+        log.info("[VmProvisionService] handleProvisionSuccess 호출. jobId={}, resultStatus={}, step={}, instanceCount={}",
+                job.getId(),
+                result.getStatus(),
+                result.getStep(),
+                (instances == null ? 0 : instances.size()));
+
         if (instances == null || instances.isEmpty()) {
             log.warn("[VmProvisionService] Job {} - instances 비어 있음. vm_instance 저장 스킵", job.getId());
             return;
         }
 
-        for (InstanceInfo info : instances) {
-            Instant now = Instant.now();
+        Long tfRunId = result.getTfRunId();
+        String stateUri = buildTerraformStateUri(job.getId());
 
-            // VM 이름 한 번 계산 (null/blank 시 fallback)
-            String name = defaultString(info.getName(), "vm-" + job.getId());
+        log.info("[VmProvisionService] jobId={}, tfRunId={}, stateUri={}",
+                job.getId(), tfRunId, stateUri);
 
-            // 대표 IP (vm_instance.ip와 동일하게 사용)
-            String ip = resolveIp(info);
+        try {
+            for (InstanceInfo info : instances) {
+                Instant now = Instant.now();
 
-            VmInstance vm = VmInstance.builder()
-                    .name(name)
-                    .providerType(defaultString(info.getProviderType(), "VSPHERE"))
-                    .zoneId(resolveZoneId(info, job))
-                    .lifecycle("running")
-                    .powerState("ON")
-                    .vcpu(info.getCpuCores())
-                    .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null)
-                    .rootDiskGb(info.getDiskGb())
-                    .ownerUserId(job.getUserId())
-                    .teamId(job.getTeamId())
-                    .createdAt(now)
-                    .createdBy(job.getUserId())
-                    .updatedAt(now)
-                    .updatedBy(job.getUserId())
-                    .tags(buildTags(info, name, ip))
-                    .ip(ip)
-                    .build();
+                String name = defaultString(info.getName(), "vm-" + job.getId());
+                String ip = resolveIp(info);
+                String providerInstanceId = normalizeBlankToNull(info.getExternalId());
 
-            VmInstance saved = vmInstanceRepository.save(vm);
+                Long zoneId = resolveZoneId(info, job);
 
-            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}, ip={}",
-                    job.getId(), saved.getId(), saved.getName(), saved.getZoneId(), saved.getIp());
+                log.debug("[VmProvisionService] vm_instance 생성 준비. jobId={}, name={}, ip={}, zoneId={}, providerInstanceId={}",
+                        job.getId(), name, ip, zoneId, providerInstanceId);
+
+                VmInstance vm = VmInstance.builder()
+                        .name(name)
+                        .providerType(defaultString(info.getProviderType(), "VSPHERE"))
+
+                        // 위치/소유 정보
+                        .zoneId(zoneId)
+                        .ownerUserId(job.getUserId())
+                        .teamId(job.getTeamId())
+
+                        // 라이프사이클/전원 상태
+                        .lifecycle("running")
+                        .powerState("ON")
+
+                        // 스펙
+                        .vcpu(info.getCpuCores())
+                        .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null)
+                        .rootDiskGb(info.getDiskGb())
+
+                        // 연동 정보
+                        .tfRunId(tfRunId)
+                        .stateUri(stateUri)
+
+                        // 네트워크
+                        .ip(ip)
+
+                        // 태그(JSON)
+                        .tags(buildTags(info, name, ip))
+
+                        // 메타데이터
+                        .createdAt(now)
+                        .createdBy(job.getUserId())
+                        .updatedAt(now)
+                        .updatedBy(job.getUserId())
+                        .build();
+
+                VmInstance saved = vmInstanceRepository.save(vm);
+
+                log.info(
+                        "[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}, ip={}, tfRunId={}, stateUri={}",
+                        job.getId(), saved.getId(), saved.getName(), saved.getZoneId(), saved.getIp(),
+                        saved.getTfRunId(), saved.getStateUri()
+                );
+            }
+        } catch (Exception e) {
+            log.error("[VmProvisionService] vm_instance 저장 중 예외 발생. jobId={}", job.getId(), e);
+            throw e; // 트랜잭션 롤백되게 그대로 다시 던짐
         }
     }
 
-    /**
-     * InstanceInfo 또는 Job 에서 zoneId 결정
-     */
     private Long resolveZoneId(InstanceInfo info, VmProvisionJob job) {
         if (info.getZoneId() != null) {
             return info.getZoneId();
@@ -86,40 +126,24 @@ public class VmProvisionService {
         return null;
     }
 
-    /**
-     * vm_instance.tags 필드에 저장할 통일된 태그 구조
-     *
-     * {
-     *   "externalId": "vm-473",
-     *   "vmName": "Vmprovision-db-ip-test123123",
-     *   "primaryIp": "172.16.5.109",
-     *   "nicIps": ["172.16.5.109"],
-     *   "osType": "ubuntu"
-     * }
-     */
     private String buildTags(InstanceInfo info, String vmName, String primaryIp) {
         Map<String, Object> m = new LinkedHashMap<>();
 
-        // 1) vSphere VM ID (MoRef 또는 UUID)
         if (info.getExternalId() != null && !info.getExternalId().isBlank()) {
             m.put("externalId", info.getExternalId().trim());
         }
 
-        // 2) VM 이름 (CloudPilot 상 이름과 동일)
         m.put("vmName", vmName);
 
-        // 3) 대표 IP (vm_instance.ip와 동일)
         if (primaryIp != null && !primaryIp.isBlank()) {
             m.put("primaryIp", primaryIp.trim());
         }
 
-        // 4) NIC 별 IP 리스트
         List<String> nicIps = parseNicAddresses(info.getNicAddresses());
         if (!nicIps.isEmpty()) {
             m.put("nicIps", nicIps);
         }
 
-        // 5) OS 타입
         if (info.getOsType() != null && !info.getOsType().isBlank()) {
             m.put("osType", info.getOsType().trim());
         }
@@ -137,9 +161,6 @@ public class VmProvisionService {
         }
     }
 
-    /**
-     * "172.16.0.10,172.16.0.11" → ["172.16.0.10", "172.16.0.11"]
-     */
     private List<String> parseNicAddresses(String nicAddresses) {
         List<String> result = new ArrayList<>();
         if (nicAddresses == null || nicAddresses.isBlank()) {
@@ -156,11 +177,6 @@ public class VmProvisionService {
         return result;
     }
 
-    /**
-     * 팀 네트워크용 대표 IP 결정 로직
-     * 1) ipAddress 가 있으면 그걸 사용
-     * 2) 없으면 nicAddresses 에서 첫 번째 IP 사용
-     */
     private String resolveIp(InstanceInfo info) {
         if (info.getIpAddress() != null && !info.getIpAddress().isBlank()) {
             return info.getIpAddress().trim();
@@ -176,5 +192,18 @@ public class VmProvisionService {
 
     private String defaultString(String value, String def) {
         return (value == null || value.isBlank()) ? def : value;
+    }
+
+    private String normalizeBlankToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String buildTerraformStateUri(Long jobId) {
+        if (jobId == null) {
+            return null;
+        }
+        return "/tmp/terraform/" + jobId + "/terraform.tfstate";
     }
 }

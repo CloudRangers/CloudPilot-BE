@@ -1,4 +1,3 @@
-// src/main/java/com/cloudrangers/cloudpilot/dto/response/DeleteVmResponse.java
 package com.cloudrangers.cloudpilot.dto.response;
 
 import lombok.AllArgsConstructor;
@@ -6,13 +5,23 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class DeleteVmResponse {
-    private String jobId;      // String (UUID 등)
-    private Long vmId;
-    private String status;     // "QUEUED" 등
-    private Long requestedBy;  // 서비스에서 내려주는 필드가 있으니 DTO에도 추가
+
+    private String jobId;           // 삭제 Job ID (UUID)
+    private Long vmId;              // VM Instance ID
+    private String vmName;          // VM 이름
+    private String status;          // QUEUED / DELETING / DELETED / FAILED
+    private Long requestedBy;       // 요청자 User ID
+    private Instant requestedAt;    // 요청 시간
+    private String message;         // 상태 메시지
+
+    // 추가 정보 (선택)
+    private String providerType;    // VSPHERE / AWS
+    private Long zoneId;            // Zone ID
 }
