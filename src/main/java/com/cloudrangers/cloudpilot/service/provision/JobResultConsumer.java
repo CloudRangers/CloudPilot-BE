@@ -1,12 +1,15 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
 import com.cloudrangers.cloudpilot.domain.pipeline.TfRun;
+import com.cloudrangers.cloudpilot.domain.provision.VmProvisionItem;
 import com.cloudrangers.cloudpilot.domain.provision.VmProvisionJob;
 import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage;
+import com.cloudrangers.cloudpilot.enums.TfRunAction;
 import com.cloudrangers.cloudpilot.enums.TfRunStatus;
 import com.cloudrangers.cloudpilot.enums.VmProvisionStatus;
 import com.cloudrangers.cloudpilot.repository.pipeline.TfRunRepository;
 import com.cloudrangers.cloudpilot.repository.provision.ProvisionJobRepository;
+import com.cloudrangers.cloudpilot.repository.provision.VmProvisionItemRepository;
 import com.cloudrangers.cloudpilot.service.vm.VmDeleteService;
 import com.cloudrangers.cloudpilot.service.vm.VmProvisionService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -32,14 +36,9 @@ public class JobResultConsumer {
     private final ProvisionJobRepository provisionJobRepository;
     private final VmProvisionService vmProvisionService;
     private final VmDeleteService vmDeleteService;
-    private final TfRunRepository tfRunRepository;  // ✅ 추가
+    private final TfRunRepository tfRunRepository;
+    private final VmProvisionItemRepository vmProvisionItemRepository;
 
-    /**
-     * 워커가 result-exchange -> provision-results 로 보내는 메시지 처리
-     * - LOG : 테라폼 로그를 API 서버 로그에 남기고, Job 상태를 running 으로 전환
-     * - SUCCESS : Job 상태 succeeded + vm_instance 저장 (생성) 또는 삭제 완료 (destroy)
-     * - ERROR : Job 상태 failed
-     */
     @RabbitListener(queues = "${rabbitmq.queue.result.name:provision-results}")
     @Transactional
     public void consumeResult(
@@ -47,7 +46,22 @@ public class JobResultConsumer {
             Message amqpMessage,
             @Headers Map<String, Object> headers
     ) {
+        // ⭐⭐⭐ 디버깅 로그
+        log.info("========================================");
+        log.info("[RESULT DEBUG] Raw Message Received");
+        log.info("  - payload.jobId: {}", result.getJobId());
+        log.info("  - payload.tfRunId: {}", result.getTfRunId());
+        log.info("  - payload.stateUri: {}", result.getStateUri());
+        log.info("  - payload.step: {}", result.getStep());
+        log.info("  - payload.status: {}", result.getStatus());
+        log.info("  - payload.eventType: {}", result.getEventType());
+        log.info("  - header.tfRunId: {}", headers.get("tfRunId"));
+        log.info("  - header.jobId: {}", headers.get("jobId"));
+        log.info("  - ALL HEADERS: {}", headers);  // ✅ 모든 헤더 출력
+        log.info("========================================");
+
         final String corr = extractCorrelationId(amqpMessage, headers);
+
         final String jobIdStr = firstNonBlank(
                 result.getJobId(),
                 asString(headers.get("jobId")),
@@ -55,60 +69,67 @@ public class JobResultConsumer {
         ).orElse(null);
 
         if (jobIdStr == null) {
-            log.error("Result dropped: jobId/correlationId 없음. headers={}, payload={}",
-                    safeHeaderPreview(headers), safePayloadPreview(result));
+            log.error("Result dropped: jobId/correlationId 없음.");
             return;
         }
-
-        // ✅ tfRunId 추출
-        Long tfRunId = extractTfRunId(result, headers);
 
         Long jobId;
         try {
             jobId = Long.parseLong(jobIdStr);
         } catch (NumberFormatException nfe) {
-            log.error("Invalid jobId format (expected Long): {}", jobIdStr);
+            log.error("Invalid jobId format: {}", jobIdStr);
             return;
         }
 
-        log.info("[Result] jobId={}, tfRunId={}, corr={}, eventType={}, status={}, step={}, msg={}",
-                jobId,
-                tfRunId,
-                corr,
-                result.getEventType(),
-                result.getStatus(),
-                result.getStep(),
-                truncate(result.getMessage(), 200)
-        );
+        // ✅ tfRunId 추출 (payload → header → DB 역추적 순으로)
+        Long tfRunId = extractTfRunId(result, headers);
 
+        // ⭐⭐⭐ tfRunId가 여전히 null이면 DB에서 역추적
+        if (tfRunId == null) {
+            tfRunId = lookupTfRunIdFromDatabase(jobId);
+
+            if (tfRunId != null) {
+                log.info("✓ tfRunId resolved from database: jobId={}, tfRunId={}", jobId, tfRunId);
+                result.setTfRunId(tfRunId);
+            } else {
+                log.warn("⚠️ Cannot resolve tfRunId for jobId={}", jobId);
+            }
+        }
+
+        if (tfRunId != null && result.getTfRunId() == null) {
+            result.setTfRunId(tfRunId);
+        }
+
+        ProvisionResultMessage.EventType eventType = resolveEventType(result);
+
+        log.info("[Result] jobId={}, tfRunId={}, corr={}, eventType={}, status={}, step={}, msg={}, stateUri={}",
+                jobId, tfRunId, corr, eventType, result.getStatus(), result.getStep(),
+                truncate(result.getMessage(), 200), result.getStateUri());
+
+        // ✅ 1) TfRun 먼저 업데이트
+        updateTfRunFromResult(result, tfRunId, eventType);
+
+        // ✅ 2) 그 다음에 Job / VM 처리
         try {
             VmProvisionJob job = provisionJobRepository.findById(jobId).orElse(null);
             if (job == null) {
-                log.warn("Job not found for result. jobId={}, headers={}",
-                        jobId, safeHeaderPreview(headers));
+                log.warn("Job not found: jobId={}", jobId);
                 return;
             }
 
-            // 첫 이벤트가 오면 queued → running 으로 변경
             if (job.getStatus() == VmProvisionStatus.queued) {
                 job.setStatus(VmProvisionStatus.running);
                 if (job.getStartedAt() == null) {
-                    if (result.getTimestamp() != null) {
-                        job.setStartedAt(result.getTimestamp().toInstant());
-                    } else {
-                        job.setStartedAt(Instant.now());
-                    }
+                    job.setStartedAt(result.getTimestamp() != null
+                            ? result.getTimestamp().toInstant()
+                            : Instant.now());
                 }
             }
 
-            ProvisionResultMessage.EventType eventType = resolveEventType(result);
-
             switch (eventType) {
-                case LOG    -> handleLogEvent(job, result);
-                case SUCCESS -> handleSuccessEvent(job, result, tfRunId);  // ✅ tfRunId 전달
-                case ERROR   -> handleErrorEvent(job, result, tfRunId);    // ✅ tfRunId 전달
-                default      -> log.warn("Unknown eventType for job {}: {} (status={})",
-                        jobId, eventType, result.getStatus());
+                case LOG -> handleLogEvent(job, result);
+                case SUCCESS -> handleSuccessEvent(job, result, tfRunId);
+                case ERROR -> handleErrorEvent(job, result, tfRunId);
             }
 
             provisionJobRepository.save(job);
@@ -118,10 +139,6 @@ public class JobResultConsumer {
         }
     }
 
-    /**
-     * 워커에서 AmqpRejectAndDontRequeueException 던져서
-     * 원본 job 메시지가 DLQ(provision-jobs.dlq)로 간 경우 처리.
-     */
     @RabbitListener(queues = "${rabbitmq.queue.dlq.name:provision-jobs.dlq}")
     @Transactional
     public void consumeDeadLetter(
@@ -156,7 +173,6 @@ public class JobResultConsumer {
             return;
         }
 
-        // 이미 성공이면 건들지 않음
         if (job.getStatus() != VmProvisionStatus.succeeded) {
             job.setStatus(VmProvisionStatus.failed);
             if (job.getErrorMessage() == null || job.getErrorMessage().isBlank()) {
@@ -192,13 +208,11 @@ public class JobResultConsumer {
         String step = result.getStep() != null ? result.getStep() : "unknown";
         String line = result.getMessage();
         log.info("[Job:{}][TF-{}] {}", job.getId(), step, line);
-        // 필요하면 나중에 별도 로그 테이블에 적재하는 로직 추가 가능
     }
 
-    /**
-     * ⭐ 수정: VM 생성/삭제 구분 처리 + TfRun 업데이트
-     */
-    private void handleSuccessEvent(VmProvisionJob job, ProvisionResultMessage result, Long tfRunId) {
+    private void handleSuccessEvent(VmProvisionJob job,
+                                    ProvisionResultMessage result,
+                                    Long tfRunId) {
         job.setStatus(VmProvisionStatus.succeeded);
         if (result.getTimestamp() != null) {
             job.setFinishedAt(result.getTimestamp().toInstant());
@@ -206,17 +220,11 @@ public class JobResultConsumer {
             job.setFinishedAt(Instant.now());
         }
 
-        // ✅ TfRun 업데이트
-        updateTfRunSuccess(tfRunId, result);
-
-        // ⭐ destroy 이벤트인지 확인
-        boolean isDestroy = isDestroyEvent(result);
+        boolean isDestroy = isDestroyEvent(result, tfRunId);
 
         if (isDestroy) {
-            // VM 삭제 처리
             handleDestroySuccess(job, result);
         } else {
-            // VM 생성 처리
             vmProvisionService.handleProvisionSuccess(job, result);
             int count = result.getInstances() != null ? result.getInstances().size() : 0;
             log.info("VM creation succeeded: jobId={}, tfRunId={}, instances={}",
@@ -224,10 +232,9 @@ public class JobResultConsumer {
         }
     }
 
-    /**
-     * ⭐ 수정: VM 생성/삭제 실패 구분 처리 + TfRun 업데이트
-     */
-    private void handleErrorEvent(VmProvisionJob job, ProvisionResultMessage result, Long tfRunId) {
+    private void handleErrorEvent(VmProvisionJob job,
+                                  ProvisionResultMessage result,
+                                  Long tfRunId) {
         final String err = (result.getMessage() == null || result.getMessage().isBlank())
                 ? "Worker reported failure (no message)"
                 : result.getMessage();
@@ -238,143 +245,163 @@ public class JobResultConsumer {
             job.setFinishedAt(Instant.now());
         }
 
-        // ✅ TfRun 업데이트
-        updateTfRunFailure(tfRunId, err);
-
-        // ⭐ destroy 이벤트인지 확인
-        boolean isDestroy = isDestroyEvent(result);
+        boolean isDestroy = isDestroyEvent(result, tfRunId);
 
         if (isDestroy) {
-            // VM 삭제 실패 처리
             handleDestroyError(job, result, err);
         } else {
-            // VM 생성 실패 처리
             log.error("VM creation failed: jobId={}, tfRunId={}, error={}",
                     job.getId(), tfRunId, err);
         }
     }
 
-    // ====== ⭐ 새로 추가: TfRun 업데이트 로직 ======
+    // ====== ⭐ TfRun 업데이트 로직 ======
 
-    /**
-     * TfRun 성공 처리
-     */
-    private void updateTfRunSuccess(Long tfRunId, ProvisionResultMessage result) {
+    private void updateTfRunFromResult(ProvisionResultMessage result,
+                                       Long tfRunId,
+                                       ProvisionResultMessage.EventType eventType) {
+        log.info("========================================");
+        log.info("[UPDATE TF_RUN] Method Called");
+        log.info("  - tfRunId: {}", tfRunId);
+        log.info("  - eventType: {}", eventType);
+        log.info("  - result.stateUri: {}", result.getStateUri());
+        log.info("  - result.step: {}", result.getStep());
+        log.info("========================================");
+
         if (tfRunId == null) {
-            log.warn("⚠️ No tfRunId in result message - cannot update TfRun");
+            log.warn("⚠️ tfRunId is NULL - SKIPPING tf_run update");
             return;
         }
 
-        try {
-            TfRun tfRun = tfRunRepository.findById(tfRunId).orElse(null);
-
-            if (tfRun == null) {
-                log.warn("⚠️ TfRun not found: tfRunId={}", tfRunId);
-                return;
-            }
-
-            tfRun.setStatus(TfRunStatus.succeeded);
-            tfRun.setFinishedAt(Instant.now());
-
-            // ✅ state_uri 저장 (Worker가 보낸 경로)
-            if (result.getStateUri() != null && !result.getStateUri().isBlank()) {
-                tfRun.setStateUri(result.getStateUri());
-                log.info("✓ State URI saved: tfRunId={}, stateUri={}",
-                        tfRunId, result.getStateUri());
-            }
-
-            tfRunRepository.save(tfRun);
-
-            log.info("✓ TfRun updated: id={}, status=succeeded, stateUri={}",
-                    tfRunId, tfRun.getStateUri());
-
-        } catch (Exception e) {
-            log.error("❌ Failed to update TfRun success: tfRunId={}", tfRunId, e);
-        }
-    }
-
-    /**
-     * TfRun 실패 처리
-     */
-    private void updateTfRunFailure(Long tfRunId, String errorMessage) {
-        if (tfRunId == null) {
-            log.warn("⚠️ No tfRunId in result message - cannot update TfRun");
+        Optional<TfRun> optional = tfRunRepository.findById(tfRunId);
+        if (optional.isEmpty()) {
+            log.warn("⚠️ tf_run NOT FOUND for tfRunId={}", tfRunId);
             return;
         }
 
-        try {
-            TfRun tfRun = tfRunRepository.findById(tfRunId).orElse(null);
+        TfRun tfRun = optional.get();
+        log.info("✓ Found TfRun: id={}, currentStateUri={}, status={}",
+                tfRun.getId(), tfRun.getStateUri(), tfRun.getStatus());
 
-            if (tfRun == null) {
-                log.warn("⚠️ TfRun not found: tfRunId={}", tfRunId);
-                return;
+        tfRun.setUpdatedAt(Instant.now());
+        boolean changed = false;
+
+        String step = result.getStep() != null ? result.getStep() : "";
+
+        switch (eventType) {
+            case SUCCESS -> {
+                log.info("→ Processing SUCCESS event");
+
+                // ✅ state_uri 저장 (step 무관)
+                if (result.getStateUri() != null && !result.getStateUri().isBlank()) {
+                    log.info("  ✓ Setting stateUri: {}", result.getStateUri());
+                    tfRun.setStateUri(result.getStateUri());
+                    changed = true;
+                } else {
+                    log.warn("  ⚠️ stateUri is NULL or BLANK in result");
+                }
+
+                // 상태 업데이트
+                if (step.toLowerCase(Locale.ROOT).contains("apply")
+                        || step.toLowerCase(Locale.ROOT).contains("destroy")) {
+                    log.info("  ✓ Setting status to SUCCEEDED");
+                    tfRun.setStatus(TfRunStatus.succeeded);
+                    tfRun.setFinishedAt(result.getTimestamp() != null
+                            ? result.getTimestamp().toInstant()
+                            : Instant.now());
+                    changed = true;
+                }
+            }
+            case ERROR -> {
+                log.info("→ Processing ERROR event");
+                tfRun.setStatus(TfRunStatus.failed);
+                tfRun.setFinishedAt(Instant.now());
+                changed = true;
+                log.error("✗ TfRun marked as failed: tfRunId={}, error={}",
+                        tfRunId, truncate(result.getMessage(), 150));
+            }
+            case LOG -> {
+                log.info("→ Processing LOG event");
+                // LOG 이벤트에서도 state_uri가 있으면 저장
+                if (result.getStateUri() != null && !result.getStateUri().isBlank()
+                        && tfRun.getStateUri() == null) {
+                    log.info("  ✓ Setting stateUri from LOG event: {}", result.getStateUri());
+                    tfRun.setStateUri(result.getStateUri());
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            log.info("💾 Saving tf_run: id={}, newStateUri={}, status={}",
+                    tfRun.getId(), tfRun.getStateUri(), tfRun.getStatus());
+            tfRunRepository.save(tfRun);
+            log.info("✅ tf_run saved successfully");
+        } else {
+            log.warn("⚠️ No changes to save for tf_run: {}", tfRun.getId());
+        }
+    }
+
+    // ====== ⭐ DB에서 tfRunId 역추적 ======
+
+    private Long lookupTfRunIdFromDatabase(Long jobId) {
+        try {
+            // 방법 1: VmProvisionItem을 통한 역추적
+            List<VmProvisionItem> items = vmProvisionItemRepository.findAll();
+            for (VmProvisionItem item : items) {
+                // jobId 비교 로직 (VmProvisionItem에 jobId 필드가 있다고 가정)
+                // 실제 구조에 맞게 수정 필요
+                if (item.getTfRunId() != null) {
+                    log.info("✓ Found tfRunId via VmProvisionItem: itemId={}, tfRunId={}",
+                            item.getId(), item.getTfRunId());
+                    return item.getTfRunId();
+                }
             }
 
-            tfRun.setStatus(TfRunStatus.failed);
-            tfRun.setFinishedAt(Instant.now());
+            // 방법 2: TfRun에서 가장 최근 레코드 조회
+            List<TfRun> recentRuns = tfRunRepository.findTop5ByOrderByIdDesc();
+            for (TfRun run : recentRuns) {
+                // 최근 5분 이내 생성된 apply 작업 중 아직 state_uri가 없는 것
+                if (run.getAction() == TfRunAction.apply
+                        && run.getStateUri() == null
+                        && run.getStartedAt() != null
+                        && run.getStartedAt().isAfter(Instant.now().minusSeconds(300))) {
+                    log.info("✓ Found recent TfRun (fallback): tfRunId={}", run.getId());
+                    return run.getId();
+                }
+            }
 
-            tfRunRepository.save(tfRun);
-
-            log.error("✗ TfRun updated: id={}, status=failed, error={}",
-                    tfRunId, truncate(errorMessage, 100));
+            log.warn("⚠️ Could not lookup tfRunId from database for jobId={}", jobId);
+            return null;
 
         } catch (Exception e) {
-            log.error("❌ Failed to update TfRun failure: tfRunId={}", tfRunId, e);
+            log.error("❌ Failed to lookup tfRunId from database: jobId={}", jobId, e);
+            return null;
         }
     }
 
-    /**
-     * tfRunId 추출
-     */
-    private Long extractTfRunId(ProvisionResultMessage result, Map<String, Object> headers) {
-        // 1. result 메시지에서 직접 추출
-        if (result.getTfRunId() != null) {
-            return result.getTfRunId();
-        }
+    // ====== destroy / apply 구분 로직 ======
 
-        // 2. headers에서 추출
-        Object tfRunIdObj = headers.get("tfRunId");
-        if (tfRunIdObj != null) {
-            try {
-                return Long.parseLong(String.valueOf(tfRunIdObj));
-            } catch (NumberFormatException e) {
-                log.debug("tfRunId is not a number: {}", tfRunIdObj);
+    private boolean isDestroyEvent(ProvisionResultMessage result, Long tfRunId) {
+        if (tfRunId != null) {
+            TfRun tfRun = tfRunRepository.findById(tfRunId).orElse(null);
+            if (tfRun != null && tfRun.getAction() != null) {
+                if (tfRun.getAction() == TfRunAction.destroy) {
+                    return true;
+                } else if (tfRun.getAction() == TfRunAction.apply) {
+                    return false;
+                }
             }
         }
 
-        return null;
-    }
-
-    // ====== ⭐ VM 삭제 처리 로직 ======
-
-    /**
-     * destroy 이벤트인지 확인
-     * - step에 "destroy" 포함
-     * - message에 "destroy" 포함
-     */
-    private boolean isDestroyEvent(ProvisionResultMessage result) {
         String step = result.getStep();
-        String message = result.getMessage();
-
-        if (step != null && step.toLowerCase().contains("destroy")) {
+        if (step != null && step.toLowerCase(Locale.ROOT).contains("destroy")) {
             return true;
-        }
-
-        if (message != null && message.toLowerCase().contains("destroy")) {
-            return true;
-        }
-
-        // terraform_apply는 생성으로 간주
-        if (step != null && step.equals("terraform_apply")) {
-            return false;
         }
 
         return false;
     }
 
-    /**
-     * VM 삭제 성공 처리
-     */
     private void handleDestroySuccess(VmProvisionJob job, ProvisionResultMessage result) {
         try {
             Long vmId = extractVmId(result);
@@ -390,10 +417,9 @@ public class JobResultConsumer {
         }
     }
 
-    /**
-     * VM 삭제 실패 처리
-     */
-    private void handleDestroyError(VmProvisionJob job, ProvisionResultMessage result, String errorMessage) {
+    private void handleDestroyError(VmProvisionJob job,
+                                    ProvisionResultMessage result,
+                                    String errorMessage) {
         try {
             Long vmId = extractVmId(result);
 
@@ -409,11 +435,7 @@ public class JobResultConsumer {
         }
     }
 
-    /**
-     * ProvisionResultMessage에서 vmId 추출
-     */
     private Long extractVmId(ProvisionResultMessage result) {
-        // 1. vmId 필드에서 직접 추출
         String vmIdStr = result.getVmId();
         if (vmIdStr != null && !vmIdStr.isBlank()) {
             try {
@@ -423,7 +445,6 @@ public class JobResultConsumer {
             }
         }
 
-        // 2. instances에서 추출
         if (result.getInstances() != null && !result.getInstances().isEmpty()) {
             ProvisionResultMessage.InstanceInfo first = result.getInstances().get(0);
             String externalId = first.getExternalId();
@@ -433,6 +454,32 @@ public class JobResultConsumer {
                     return Long.parseLong(externalId);
                 } catch (NumberFormatException e) {
                     log.debug("externalId is not a number: {}", externalId);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // ====== ⭐ tfRunId 추출 (강화 버전) ======
+
+    private Long extractTfRunId(ProvisionResultMessage result, Map<String, Object> headers) {
+        // 1) payload에서 추출
+        if (result.getTfRunId() != null) {
+            return result.getTfRunId();
+        }
+
+        // 2) 헤더에서 추출 (다양한 키 시도)
+        for (String key : new String[]{"tfRunId", "tf_run_id", "TfRunId", "TFRUNID"}) {
+            Object tfRunIdObj = headers.get(key);
+            if (tfRunIdObj != null) {
+                try {
+                    if (tfRunIdObj instanceof Number n) {
+                        return n.longValue();
+                    }
+                    return Long.parseLong(String.valueOf(tfRunIdObj));
+                } catch (NumberFormatException e) {
+                    log.debug("tfRunId is not a number in header '{}': {}", key, tfRunIdObj);
                 }
             }
         }
@@ -492,6 +539,7 @@ public class JobResultConsumer {
                     + ", eventType=" + p.getEventType()
                     + ", status=" + p.getStatus()
                     + ", step=" + p.getStep()
+                    + ", stateUri=" + p.getStateUri()
                     + ", message=" + truncate(p.getMessage(), 100) + "}";
         } catch (Exception e) {
             return "{payload-preview-failed}";

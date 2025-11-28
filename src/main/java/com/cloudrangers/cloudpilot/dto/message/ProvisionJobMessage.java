@@ -20,6 +20,10 @@ public class ProvisionJobMessage {
     private Object providerType;    // "VSPHERE" 등 (Enum/문자열 허용)
     private Long zoneId;            // 워커 DTO와 맞추기 위해 Long 사용
 
+    // ===== Terraform 상태 파일 경로(선택) =====
+    // BE에서 미리 계산해서 넘겨주면 워커가 그대로 사용 가능
+    private String stateUri;
+
     // ===== 호출자 컨텍스트(워커 로그/추적용) =====
     private Long userId;
     private Long teamId;

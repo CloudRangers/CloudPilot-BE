@@ -21,6 +21,14 @@ public class VmInstance {
     @Column(name = "provision_item_id")
     private Long provisionItemId;
 
+    // 🔥 추가: 이 VM을 만든 Terraform 실행(tf_run)의 ID
+    @Column(name = "tf_run_id")
+    private Long tfRunId;
+
+    // 🔥 추가: 해당 실행에서 사용한 terraform state 파일 경로(워커 로컬 경로)
+    @Column(name = "state_uri", length = 1024)
+    private String stateUri;
+
     private String name;           // VM 이름
     private String providerType;   // AWS / VSPHERE
     private Long zoneId;           // Zone 참조
@@ -55,4 +63,3 @@ public class VmInstance {
     @Column(name = "ip")
     private String ip;
 }
-

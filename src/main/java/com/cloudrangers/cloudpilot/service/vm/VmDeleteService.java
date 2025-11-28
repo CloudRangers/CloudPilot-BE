@@ -19,6 +19,14 @@ import java.util.UUID;
  * - VM 삭제 요청 처리
  * - lifecycle 상태를 'deleting'으로 변경
  * - JobQueueService를 통해 destroy Job 전송
+ *
+ * 💡 주의:
+ *  - 실제 Terraform destroy 시에는 VM 생성 시점에 사용된 tf_run의 state 파일이 필요하다.
+ *  - 따라서 JobQueueService.pushDeleteJob(...) 내부에서
+ *      - vm.getId()      → additionalConfig.vmId
+ *      - vm.getTfRunId() → additionalConfig.tfRunId
+ *      - vm.getStateUri()→ additionalConfig.stateUri
+ *    를 넣어줘야 TerraformExecutor 가 destroy 시 이전 state 를 재사용할 수 있다.
  */
 @Service
 @RequiredArgsConstructor
@@ -66,10 +74,28 @@ public class VmDeleteService {
             );
         }
 
-        // 3. 삭제 Job ID 생성
+        // 3. Terraform state 연동 정보 로그 (디버깅/운영상 확인용)
+        Long tfRunId = vm.getTfRunId();
+        String stateUri = vm.getStateUri();
+
+        log.info("🧩 [VmDeleteService] Current VM state before deletion: " +
+                        "vmId={}, vmName={}, tfRunId={}, stateUri={}",
+                vmId, vm.getName(), tfRunId, stateUri);
+
+        if (stateUri == null || stateUri.isBlank()) {
+            // 여기서 에러를 던지지 않고 경고만 남긴다.
+            // - 이미 수동으로 삭제된 VM을 DB 상에서만 정리할 수도 있기 때문.
+            // - Terraform 관점에서는 state 없이 destroy를 실행하면 "삭제할 리소스 없음"으로 끝난다.
+            log.warn("⚠️ [VmDeleteService] VM {} 는 stateUri 가 없어 Terraform 기반 자동 삭제는 수행되지 않을 수 있음. " +
+                            "이미 vSphere 에서 수동 삭제된 VM 이거나, 이전 버전에서 생성된 VM 일 수 있음.",
+                    vmId);
+        }
+
+        // 4. 삭제 Job ID 생성 (워커에서 사용하는 논리적 jobId)
         String jobId = UUID.randomUUID().toString();
 
-        // 4. VM 상태를 'deleting'으로 변경
+        // 5. VM 상태를 'deleting'으로 변경
+        String previousLifecycle = vm.getLifecycle();   // 로그/롤백용으로 먼저 저장
         vm.setLifecycle("deleting");
         vm.setUpdatedAt(Instant.now());
         vm.setUpdatedBy(requestedBy);
@@ -77,11 +103,13 @@ public class VmDeleteService {
 
         log.info("✅ [VmDeleteService] VM lifecycle updated to 'deleting': " +
                         "vmId={}, vmName={}, previousLifecycle={}",
-                vmId, vm.getName(), vm.getLifecycle());
+                vmId, vm.getName(), previousLifecycle);
 
-        // 5. JobQueueService를 통해 destroy Job 전송
+        // 6. JobQueueService를 통해 destroy Job 전송
         try {
+            // 💡 pushDeleteJob 내부에서 vmId / tfRunId / stateUri 를 additionalConfig에 넣어야 함
             jobQueueService.pushDeleteJob(jobId, vm, requestedBy);
+
             log.info("📤 [VmDeleteService] Destroy job enqueued: jobId={}, vmId={}",
                     jobId, vmId);
         } catch (Exception e) {
@@ -89,7 +117,7 @@ public class VmDeleteService {
                     "jobId={}, vmId={}", jobId, vmId, e);
 
             // Job 전송 실패 시 상태 롤백
-            vm.setLifecycle("running");  // 원래 상태로 복구 (가정)
+            vm.setLifecycle(previousLifecycle != null ? previousLifecycle : "running");
             vm.setUpdatedAt(Instant.now());
             vmInstanceRepository.save(vm);
 
@@ -99,7 +127,7 @@ public class VmDeleteService {
             );
         }
 
-        // 6. 응답 생성
+        // 7. 응답 생성
         DeleteVmResponse response = DeleteVmResponse.builder()
                 .jobId(jobId)
                 .vmId(vm.getId())
@@ -121,8 +149,6 @@ public class VmDeleteService {
 
     /**
      * VM 삭제 완료 처리 (Worker에서 SUCCESS 이벤트를 받은 후 호출)
-     *
-     * @param vmId 삭제된 VM ID
      */
     @Transactional
     public void markAsDeleted(Long vmId) {
@@ -145,9 +171,6 @@ public class VmDeleteService {
 
     /**
      * VM 삭제 실패 처리 (Worker에서 ERROR 이벤트를 받은 후 호출)
-     *
-     * @param vmId 삭제 실패한 VM ID
-     * @param errorMessage 에러 메시지
      */
     @Transactional
     public void markDeletionFailed(Long vmId, String errorMessage) {
@@ -160,7 +183,6 @@ public class VmDeleteService {
                         "VM not found: " + vmId
                 ));
 
-        // 삭제 실패 시 상태를 다시 'running'으로 복구 (또는 'deletion_failed' 등 별도 상태 추가)
         vm.setLifecycle("running");
         vm.setUpdatedAt(Instant.now());
         vmInstanceRepository.save(vm);
