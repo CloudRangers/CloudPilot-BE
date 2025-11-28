@@ -1,6 +1,7 @@
 package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
+import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 import com.cloudrangers.cloudpilot.dto.response.DeleteVmResponse;
 import com.cloudrangers.cloudpilot.dto.response.VmDetailResponse;
 import com.cloudrangers.cloudpilot.dto.response.VmStatusResponse;
@@ -14,8 +15,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.*;
-import com.cloudrangers.cloudpilot.dto.common.PageResponse;
+
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -80,7 +82,7 @@ public class VmController {
     }
 
     /**
-     * ⭐ VM 삭제 (비동기 처리)
+     *  VM 삭제 (비동기 처리)
      * - JWT 토큰에서 사용자 정보 추출
      * - lifecycle 상태를  'deleting'으로 변경
      * - RabbitMQ를 통해 Worker에게 terraform destroy 요청
@@ -90,20 +92,19 @@ public class VmController {
      * @return 삭제 Job 정보 (jobId, status 등)
      */
     @DeleteMapping("/{vmId}")
-    @ResponseStatus(HttpStatus.ACCEPTED)  // ⭐ 202 Accepted
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(
             summary = "VM 삭제",
             description = "VM을 비동기로 삭제합니다. JWT 토큰으로 인증된 사용자만 요청할 수 있으며, 삭제 요청이 큐에 적재되고 Worker가 terraform destroy를 실행합니다."
     )
     public ApiResponse<DeleteVmResponse> deleteVm(
             @Parameter(description = "삭제할 VM ID", required = true)
-            @PathVariable("vmId") Long vmId  // ⭐ "vmId" 명시
+            @PathVariable("vmId") Long vmId
     ) {
-        // ⭐ JWT 토큰에서 현재 로그인한 사용자 ID 추출
         Long requestedBy = AuthUtil.getUserId();
 
         if (requestedBy == null) {
-            throw new IllegalStateException("인증되지 않은 사용자입니다. JWT 토큰을 확인해주세요.");
+            throw new AccessDeniedException("인증되지 않은 사용자입니다.");
         }
 
         // VmDeleteService를 통해 삭제 Job 큐에 적재
@@ -132,7 +133,7 @@ public class VmController {
     }
 
     /**
-     * ⭐ VM 삭제 상태 조회 (선택적 추가)
+     * ⭐ VM 삭제 상태 조회
      * - lifecycle 필드를 통해 삭제 진행 상태 확인
      *
      * @param vmId VM ID
