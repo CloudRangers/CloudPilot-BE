@@ -402,61 +402,136 @@ public class JobQueueService {
 
     private boolean notBlank(String s) { return s != null && !s.isBlank(); }
 
+    /**
+     * os_image / template_name 기반으로 템플릿 및 OS 이미지 코드 resolve
+     */
     private void resolveTemplateFromOsImage(ProvisionJobMessage msg) {
-        if (msg.getTemplate() != null
-                && (!blank(msg.getTemplate().getItemName()) || !blank(msg.getTemplate().getTemplateMoid()))) {
+        // additionalConfig 보정
+        Map<String, Object> add = msg.getAdditionalConfig();
+        if (add == null) {
+            add = new LinkedHashMap<>();
+            msg.setAdditionalConfig(add);
+        }
+
+        // 이미 os_image_code 가 있다면 그대로 사용
+        if (add.get("os_image_code") != null) {
             return;
         }
 
         Integer zoneIdInt = requireZoneIdInt(msg);
+        Map<String, Object> row = null;
 
-        String family  = safeLower(msg.getOs().getFamily());
-        String version = safeLower(msg.getOs().getVersion());
-        String variant = safeLower(msg.getOs().getVariant());
-        String arch    = safeLower(msg.getOs().getArch());
+        // 1) templateName 기반으로 os_image 찾기
+        String templateName = null;
 
-        String code = (family + "-" + version + "-" + variant + "-" + arch);
+        // additionalConfig.templateName 우선
+        Object templateNameObj = add.get("templateName");
+        if (templateNameObj != null && !blank(String.valueOf(templateNameObj))) {
+            templateName = String.valueOf(templateNameObj).trim();
+        }
 
-        List<Map<String, Object>> exact = jdbcTemplate.queryForList("""
-            SELECT id, code, name, template_name, template_moid, template_datastore, os_family, os_version, guest_id
-              FROM os_image
-             WHERE zone_id = ? AND is_active = TRUE AND LOWER(code) = ?
-             ORDER BY id DESC LIMIT 1
-        """, zoneIdInt, code.toLowerCase(Locale.ROOT));
+        // msg.getTemplate().itemName 보조로 사용
+        if (blank(templateName) && msg.getTemplate() != null && !blank(msg.getTemplate().getItemName())) {
+            templateName = msg.getTemplate().getItemName().trim();
+        }
 
-        Map<String, Object> row = !exact.isEmpty() ? exact.get(0) : null;
+        if (!blank(templateName)) {
+            // template_name 정확 일치 우선
+            List<Map<String, Object>> byTemplate = jdbcTemplate.queryForList("""
+                SELECT id, code, name, template_name, template_moid, template_datastore,
+                       os_family, os_version, guest_id
+                  FROM os_image
+                 WHERE zone_id = ? AND is_active = TRUE AND template_name = ?
+                 ORDER BY id DESC LIMIT 1
+            """, zoneIdInt, templateName);
 
+            if (!byTemplate.isEmpty()) {
+                row = byTemplate.get(0);
+                log.info("[JobQueueService] os_image resolved by template_name. zoneId={}, templateName={}, osImageId={}, code={}",
+                        zoneIdInt, templateName, row.get("id"), row.get("code"));
+            } else {
+                // 혹시 경로가 살짝 다를 수 있으니 LIKE도 한 번 더 시도
+                String like = "%" + templateName + "%";
+                List<Map<String, Object>> likeRows = jdbcTemplate.queryForList("""
+                    SELECT id, code, name, template_name, template_moid, template_datastore,
+                           os_family, os_version, guest_id
+                      FROM os_image
+                     WHERE zone_id = ? AND is_active = TRUE AND template_name LIKE ?
+                     ORDER BY id DESC LIMIT 1
+                """, zoneIdInt, like);
+                if (!likeRows.isEmpty()) {
+                    row = likeRows.get(0);
+                    log.info("[JobQueueService] os_image resolved by template_name LIKE. zoneId={}, templateName={}, matchedTemplateName={}, osImageId={}, code={}",
+                            zoneIdInt, templateName, row.get("template_name"), row.get("id"), row.get("code"));
+                }
+            }
+        }
+
+        // 2) template_name 으로 못 찾았으면 기존 OS 스펙 기반 조회 (fallback)
         if (row == null) {
-            String famLike = "%" + family + "%";
-            String verLike = "%" + version + "%";
-            List<Map<String, Object>> cands = jdbcTemplate.queryForList("""
+            String family  = safeLower(msg.getOs().getFamily());
+            String version = safeLower(msg.getOs().getVersion());
+            String variant = safeLower(msg.getOs().getVariant());
+            String arch    = safeLower(msg.getOs().getArch());
+
+            String code = (family + "-" + version + "-" + variant + "-" + arch);
+
+            List<Map<String, Object>> exact = jdbcTemplate.queryForList("""
                 SELECT id, code, name, template_name, template_moid, template_datastore, os_family, os_version, guest_id
                   FROM os_image
-                 WHERE zone_id = ? AND is_active = TRUE
-                   AND (LOWER(os_family) LIKE ? OR LOWER(name) LIKE ? OR LOWER(code) LIKE ?)
-                   AND (LOWER(os_version) LIKE ? OR LOWER(name) LIKE ? OR LOWER(code) LIKE ?)
+                 WHERE zone_id = ? AND is_active = TRUE AND LOWER(code) = ?
                  ORDER BY id DESC LIMIT 1
-            """, zoneIdInt, famLike, famLike, famLike, verLike, verLike, verLike);
-            if (!cands.isEmpty()) row = cands.get(0);
+            """, zoneIdInt, code.toLowerCase(Locale.ROOT));
+
+            if (!exact.isEmpty()) {
+                row = exact.get(0);
+            } else {
+                String famLike = "%" + family + "%";
+                String verLike = "%" + version + "%";
+                List<Map<String, Object>> cands = jdbcTemplate.queryForList("""
+                    SELECT id, code, name, template_name, template_moid, template_datastore, os_family, os_version, guest_id
+                      FROM os_image
+                     WHERE zone_id = ? AND is_active = TRUE
+                       AND (LOWER(os_family) LIKE ? OR LOWER(name) LIKE ? OR LOWER(code) LIKE ?)
+                       AND (LOWER(os_version) LIKE ? OR LOWER(name) LIKE ? OR LOWER(code) LIKE ?)
+                     ORDER BY id DESC LIMIT 1
+                """, zoneIdInt, famLike, famLike, famLike, verLike, verLike, verLike);
+                if (!cands.isEmpty()) row = cands.get(0);
+            }
+
+            if (row != null) {
+                log.info("[JobQueueService] os_image resolved by OS spec. zoneId={}, family={}, version={}, variant={}, arch={}, osImageId={}, code={}",
+                        zoneIdInt, family, version, variant, arch, row.get("id"), row.get("code"));
+            }
         }
 
         if (row == null) {
             throw new IllegalArgumentException("OS 이미지 카탈로그를 찾을 수 없습니다. zone="
-                    + zoneIdInt + ", os=" + family + " " + version + " (" + variant + "/" + arch + ")");
+                    + zoneIdInt + ", templateName=" + templateName);
         }
 
-        ProvisionJobMessage.TemplateRef t = new ProvisionJobMessage.TemplateRef();
-        t.setItemName(         (String) row.get("template_name"));
-        t.setTemplateMoid(     (String) row.get("template_moid"));
-        t.setTemplateDatastore((String) row.get("template_datastore"));
-        t.setGuestId(          (String) row.get("guest_id"));
+        // 3) TemplateRef 세팅 (없으면 새로 만들고, 비어 있는 필드만 채우기)
+        ProvisionJobMessage.TemplateRef t = msg.getTemplate();
+        if (t == null) {
+            t = new ProvisionJobMessage.TemplateRef();
+        }
+        if (blank(t.getItemName())) {
+            t.setItemName((String) row.get("template_name"));
+        }
+        if (blank(t.getTemplateMoid())) {
+            t.setTemplateMoid((String) row.get("template_moid"));
+        }
+        if (blank(t.getTemplateDatastore())) {
+            t.setTemplateDatastore((String) row.get("template_datastore"));
+        }
+        if (blank(t.getGuestId())) {
+            t.setGuestId((String) row.get("guest_id"));
+        }
         msg.setTemplate(t);
 
-        if (msg.getAdditionalConfig() == null) {
-            msg.setAdditionalConfig(new LinkedHashMap<>());
-        }
-        msg.getAdditionalConfig().put("os_image_code", row.get("code"));
-        msg.getAdditionalConfig().put("os_image_id",   row.get("id"));
+        // 4) os_image_code / os_image_id 를 additionalConfig 에 심어서 Worker 로 전달
+        add.put("os_image_code", row.get("code"));
+        add.put("os_image_id", row.get("id"));
     }
 
     private Integer requireZoneIdInt(ProvisionJobMessage msg) {
