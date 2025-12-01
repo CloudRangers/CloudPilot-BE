@@ -3,6 +3,7 @@ package com.cloudrangers.cloudpilot.controller;
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.dto.request.LoginRequest;
 import com.cloudrangers.cloudpilot.dto.response.LoginResponse;
+import com.cloudrangers.cloudpilot.dto.response.TokenRefreshResponse;
 import com.cloudrangers.cloudpilot.security.JwtProvider;
 import com.cloudrangers.cloudpilot.service.user.UserService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +24,18 @@ public class AuthController {
     private final UserService userService;
     private final JwtProvider jwtProvider;
 
+    // 공통 쿠키 생성 함수
+    // Environment-aware cookie creation could be added here (e.g., based on active profile)
+    private ResponseCookie createCookie(String name, String value, long maxAge) {
+        return ResponseCookie.from(name, value)
+                .httpOnly(true)
+                .secure(true) // Enforce HTTPS. For local testing over HTTP, this might need to be false.
+                .sameSite("Lax") // More secure default than "None"
+                .path("/")
+                .maxAge(maxAge)
+                .build();
+    }
+
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody LoginRequest request) {
 
@@ -34,22 +47,9 @@ public class AuthController {
         String accessToken = jwtProvider.generateAccessToken(empno, claims);
         String refreshToken = jwtProvider.generateRefreshToken(empno);
 
-        // ⭐ 로컬 개발환경: SameSite=None + secure=false
-        ResponseCookie accessCookie = ResponseCookie.from("access_token", accessToken)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(60 * 30)
-                .build();
-
-        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(60L * 60 * 24 * 14)
-                .build();
+        long accessTokenMaxAge = jwtProvider.getRemainingExpiration(accessToken) / 1000;
+        ResponseCookie accessCookie = createCookie("access_token", accessToken, accessTokenMaxAge);
+        ResponseCookie refreshCookie = createCookie("refresh_token", refreshToken, 60L * 60 * 24 * 14);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
@@ -60,41 +60,26 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refreshToken(HttpServletRequest request) {
 
-        String newAccessToken = userService.refresh(request);
+        TokenRefreshResponse tokens = userService.refresh(request);
 
-        ResponseCookie newAccessCookie = ResponseCookie.from("access_token", newAccessToken)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(60 * 30)
-                .build();
+        long newAccessTokenMaxAge = jwtProvider.getRemainingExpiration(tokens.getAccessToken()) / 1000;
+        ResponseCookie newAccessCookie = createCookie("access_token", tokens.getAccessToken(), newAccessTokenMaxAge);
+        ResponseCookie newRefreshCookie = createCookie("refresh_token", tokens.getRefreshToken(), 60L * 60 * 24 * 14);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, newAccessCookie.toString())
+                .header(HttpHeaders.SET_COOKIE, newRefreshCookie.toString())
                 .body(ApiResponse.success(null));
     }
+
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(HttpServletRequest request, HttpServletResponse response) {
 
         userService.logout(request);
 
-        ResponseCookie clearAccess = ResponseCookie.from("access_token", "")
-                .path("/")
-                .maxAge(0)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .build();
-
-        ResponseCookie clearRefresh = ResponseCookie.from("refresh_token", "")
-                .path("/")
-                .maxAge(0)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .build();
+        ResponseCookie clearAccess = createCookie("access_token", "", 0);
+        ResponseCookie clearRefresh = createCookie("refresh_token", "", 0);
 
         response.addHeader("Set-Cookie", clearAccess.toString());
         response.addHeader("Set-Cookie", clearRefresh.toString());

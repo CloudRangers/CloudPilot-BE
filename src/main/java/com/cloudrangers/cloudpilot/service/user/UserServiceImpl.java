@@ -4,26 +4,26 @@ import com.cloudrangers.cloudpilot.domain.user.User;
 import com.cloudrangers.cloudpilot.domain.user.UserRole;
 import com.cloudrangers.cloudpilot.dto.request.LoginRequest;
 import com.cloudrangers.cloudpilot.dto.response.LoginResponse;
+import com.cloudrangers.cloudpilot.dto.response.TokenRefreshResponse;
 import com.cloudrangers.cloudpilot.exception.badrequest.InvalidPasswordException;
 import com.cloudrangers.cloudpilot.exception.badrequest.InvalidTokenException;
+import com.cloudrangers.cloudpilot.exception.jwt.JwtExpiredException;
+import com.cloudrangers.cloudpilot.exception.jwt.JwtInvalidException;
 import com.cloudrangers.cloudpilot.exception.notfound.UserNotFoundException;
 import com.cloudrangers.cloudpilot.repository.user.UserRepository;
 import com.cloudrangers.cloudpilot.security.JwtProvider;
-import io.jsonwebtoken.Claims;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.lang.NonNull;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.lang.NonNull;
-import org.springframework.data.redis.core.RedisTemplate;
-import jakarta.servlet.http.Cookie;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Comparator;
-import java.util.UUID;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -36,6 +36,11 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
 
+    /**
+     * 로그인 처리
+     * ✔ 토큰 생성은 Controller에서 진행
+     * ✔ 여기서는 유저 정보만 반환
+     */
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
 
@@ -50,15 +55,6 @@ public class UserServiceImpl implements UserService {
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
-        Map<String, Object> claims = buildClaims(user.getEmpno().toString());
-        String accessToken = jwtProvider.generateAccessToken(
-                user.getEmpno().toString(),
-                claims
-        );
-        String refreshToken = jwtProvider.generateRefreshToken(
-                user.getEmpno().toString()
-        );
-
         return LoginResponse.builder()
                 .username(user.getUsername())
                 .roleCode(role.getCode())
@@ -68,63 +64,93 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
+    /**
+     * RefreshToken → AccessToken 재발급
+     */
     @Override
-    public String refresh(HttpServletRequest request) {
+    public TokenRefreshResponse refresh(HttpServletRequest request) {
 
-        Cookie[] cookies = request.getCookies();
-        if (cookies == null) {
+        String oldRefreshToken = extractRefreshTokenFromCookies(request);
+        if (oldRefreshToken == null) {
             throw new InvalidTokenException("refresh_token 쿠키가 없습니다.");
         }
 
-        String refreshToken = null;
-        for (Cookie cookie : cookies) {
-            if ("refresh_token".equals(cookie.getName())) {
-                refreshToken = cookie.getValue();
-            }
-        }
-
-        if (refreshToken == null) {
-            throw new InvalidTokenException("refresh_token 쿠키가 없습니다.");
-        }
-
-        if (redisTemplate.hasKey("BLACKLIST:" + refreshToken)) {
+        if (redisTemplate.hasKey("BLACKLIST:" + oldRefreshToken)) {
             throw new InvalidTokenException("만료되었거나 로그아웃된 토큰입니다.");
         }
 
-        if (!jwtProvider.validateToken(refreshToken)) {
+        if (!jwtProvider.validateToken(oldRefreshToken)) {
             throw new InvalidTokenException("유효하지 않은 리프레시 토큰입니다.");
         }
-
-        String empno = jwtProvider.getEmpno(refreshToken);
-        Map<String, Object> claims = buildClaims(empno);
-
-        return jwtProvider.generateAccessToken(empno, claims);
-    }
-
-    @Override
-    public void logout(HttpServletRequest request) {
-
-        String token = extractTokenFromCookies(request);
-
-        if (token == null) {
-            throw new InvalidTokenException("로그아웃할 access_token 쿠키가 없습니다.");
-        }
-
-        if (!jwtProvider.validateToken(token)) {
-            throw new InvalidTokenException("유효하지 않은 토큰입니다.");
-        }
-
-        long expiration = jwtProvider.getRemainingExpiration(token);
-
+        
+        // 1. 즉시 기존 리프레시 토큰을 블랙리스트에 추가 (Rotation)
+        long exp = jwtProvider.getRemainingExpiration(oldRefreshToken);
         redisTemplate.opsForValue().set(
-                "BLACKLIST:" + token,
-                "logout",
-                expiration,
+                "BLACKLIST:" + oldRefreshToken,
+                "rotated",
+                exp,
                 TimeUnit.MILLISECONDS
         );
 
-        log.info("로그아웃 완료: {}", token);
+        // 2. 새로운 토큰 생성
+        String empno = jwtProvider.getEmpno(oldRefreshToken);
+        Map<String, Object> claims = buildClaims(empno);
+        String newAccessToken = jwtProvider.generateAccessToken(empno, claims);
+        String newRefreshToken = jwtProvider.generateRefreshToken(empno);
+
+        return new TokenRefreshResponse(newAccessToken, newRefreshToken);
     }
+
+    /**
+     * 로그아웃
+     * ✔ Access + Refresh 모두 블랙리스트 처리
+     */
+    @Override
+    public void logout(HttpServletRequest request) {
+
+        // Access Token 블랙리스트
+        String accessToken = extractAccessTokenFromCookies(request);
+        if (accessToken != null) {
+            try {
+                if (jwtProvider.validateToken(accessToken)) {
+                    long exp = jwtProvider.getRemainingExpiration(accessToken);
+                    redisTemplate.opsForValue().set(
+                            "BLACKLIST:" + accessToken,
+                            "logout",
+                            exp,
+                            TimeUnit.MILLISECONDS
+                    );
+                }
+            } catch (JwtExpiredException e) {
+                log.info("로그아웃 처리 중 만료된 Access Token 발견 (블랙리스트 불필요)");
+            } catch (JwtInvalidException e) {
+                log.warn("로그아웃 처리 중 유효하지 않은 Access Token 발견: {}", e.getMessage());
+            }
+        }
+
+        // Refresh Token 블랙리스트
+        String refreshToken = extractRefreshTokenFromCookies(request);
+        if (refreshToken != null) {
+            try {
+                if (jwtProvider.validateToken(refreshToken)) {
+                    long exp = jwtProvider.getRemainingExpiration(refreshToken);
+                    redisTemplate.opsForValue().set(
+                            "BLACKLIST:" + refreshToken,
+                            "logout",
+                            exp,
+                            TimeUnit.MILLISECONDS
+                    );
+                }
+            } catch (JwtExpiredException e) {
+                log.info("로그아웃 처리 중 만료된 Refresh Token 발견 (블랙리스트 불필요)");
+            } catch (JwtInvalidException e) {
+                log.warn("로그아웃 처리 중 유효하지 않은 Refresh Token 발견: {}", e.getMessage());
+            }
+        }
+
+        log.info("로그아웃 완료 → Access & Refresh 블랙리스트 처리됨");
+    }
+
 
     @Override
     public void sendPasswordResetEmail(String email) {
@@ -147,7 +173,8 @@ public class UserServiceImpl implements UserService {
     @Override
     public void confirmPasswordReset(String token, String newPassword) {
 
-        String email = (String) redisTemplate.opsForValue().get("PWD_RESET_TOKEN:" + token);
+        String email = (String) redisTemplate.opsForValue()
+                .get("PWD_RESET_TOKEN:" + token);
 
         if (email == null) {
             throw new InvalidTokenException("비밀번호 재설정 토큰이 유효하지 않거나 만료되었습니다.");
@@ -184,6 +211,9 @@ public class UserServiceImpl implements UserService {
         log.info("비밀번호 변경 완료: {}", empno);
     }
 
+    /**
+     * JWT에 넣을 Claims 생성
+     */
     @Override
     public Map<String, Object> buildClaims(String empno) {
 
@@ -193,7 +223,6 @@ public class UserServiceImpl implements UserService {
         UserRole userRole = getHighestUserRole(user);
 
         Map<String, Object> claims = new HashMap<>();
-
         claims.put("userId", user.getId());
         claims.put("empno", user.getEmpno());
         claims.put("username", user.getUsername());
@@ -206,42 +235,54 @@ public class UserServiceImpl implements UserService {
     }
 
 
+    /**
+     * 가장 권한 높은 UserRole 반환
+     */
     private UserRole getHighestUserRole(User user) {
         return user.getUserRoles().stream()
                 .max(Comparator.comparingInt(a -> a.getRole().getPermissionLevel()))
                 .orElseThrow(() -> new RuntimeException("역할 정보가 없습니다."));
     }
 
-    private String extractTokenFromCookies(HttpServletRequest request) {
+
+    /** ACCESS TOKEN 읽기 */
+    private String extractAccessTokenFromCookies(HttpServletRequest request) {
         if (request.getCookies() == null) return null;
         for (Cookie cookie : request.getCookies()) {
-            if (cookie.getName().equals("access_token")) {
+            if ("access_token".equals(cookie.getName())) {
                 return cookie.getValue();
             }
         }
         return null;
     }
 
-    @Override
-    public void updateEmail(Long userId, String newEmail) {
-        // TODO
+    /** REFRESH TOKEN 읽기 */
+    private String extractRefreshTokenFromCookies(HttpServletRequest request) {
+        if (request.getCookies() == null) return null;
+        for (Cookie cookie : request.getCookies()) {
+            if ("refresh_token".equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
     }
 
+
+    /**
+     * 내 정보 조회 (AccessToken 기반)
+     */
     @Override
     public LoginResponse getMyInfo(HttpServletRequest request) {
 
         var authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        if (authentication == null || !authentication.isAuthenticated()) {
-            throw new InvalidTokenException("인증 정보가 없습니다.");
+        if (authentication == null ||
+                !authentication.isAuthenticated() ||
+                !(authentication.getPrincipal() instanceof com.cloudrangers.cloudpilot.security.CustomUserDetails)) {
+            throw new InvalidTokenException("Access Token expired or invalid.");
         }
 
-        // 🔥 JwtAuthenticationFilter에서 저장한 CustomUserDetails 읽기
-        Object principalObj = authentication.getPrincipal();
-
-        if (!(principalObj instanceof com.cloudrangers.cloudpilot.security.CustomUserDetails principal)) {
-            throw new InvalidTokenException("유효하지 않은 인증 정보입니다.");
-        }
+        var principal = (com.cloudrangers.cloudpilot.security.CustomUserDetails) authentication.getPrincipal();
 
         return LoginResponse.builder()
                 .username(principal.getUsername())
@@ -252,5 +293,8 @@ public class UserServiceImpl implements UserService {
                 .build();
     }
 
-
+    @Override
+    public void updateEmail(Long userId, String newEmail) {
+        // 필요 시 구현
+    }
 }
