@@ -26,7 +26,10 @@ public class JwtProvider {
     @Value("${jwt.secret}")
     private String secret;
 
+    // 30분
     private static final long ACCESS_TOKEN_EXP_MS  = 1000L * 60 * 30;
+
+    // 14일
     private static final long REFRESH_TOKEN_EXP_MS = 1000L * 60 * 60 * 24 * 14;
 
     private SecretKey getSigningKey() {
@@ -91,20 +94,35 @@ public class JwtProvider {
         return parseClaims(token).getSubject();
     }
 
+    // ⭐ Refresh Token 조회만 유지
+    public String resolveRefreshToken(HttpServletRequest request) {
+        if (request.getCookies() == null) return null;
+
+        for (Cookie cookie : request.getCookies()) {
+            if ("refresh_token".equals(cookie.getName())) {
+                return cookie.getValue();
+            }
+        }
+        return null;
+    }
+
     public long getRemainingExpiration(String token) {
         try {
             long now = System.currentTimeMillis();
             long exp = parseClaims(token).getExpiration().getTime();
             long remain = exp - now;
-            return remain > 1000 ? remain : 1000;  // 최소 1초 보장
+
+            // 최소 1초는 보장
+            return remain > 1000 ? remain : 1000;
 
         } catch (Exception e) {
-            return 1000; // 최소 1초
+            return 1000;
         }
     }
 
-    public String resolveTokenFromCookies(HttpServletRequest request) {
+    public String resolveAccessTokenFromCookies(HttpServletRequest request) {
         if (request.getCookies() == null) return null;
+
         for (Cookie cookie : request.getCookies()) {
             if ("access_token".equals(cookie.getName())) {
                 return cookie.getValue();
