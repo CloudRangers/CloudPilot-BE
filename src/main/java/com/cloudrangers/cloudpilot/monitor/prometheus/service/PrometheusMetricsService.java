@@ -1,24 +1,21 @@
 package com.cloudrangers.cloudpilot.monitor.prometheus.service;
 
 import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
+import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
+import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-/**
- * Prometheus에서 VM 단위 메트릭 요약을 조회하는 서비스
- *
- * 지금은 예시로 node_exporter 기반 메트릭(node_cpu_seconds_total, node_memory_*)을 사용하고,
- * Prometheus의 "instance" 라벨을 vCenter VM 이름과 매핑한다고 가정.
- * (⚠️ instance ↔ VM name 매핑 규칙은 인프라 쪽이랑 협의 후 수정 필요)
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -27,115 +24,168 @@ public class PrometheusMetricsService {
     private final PrometheusClient prometheusClient;
     private final ObjectMapper objectMapper;
 
+    private final VmInstanceRepository vmInstanceRepository;
+    private final MetricTargetRepository metricTargetRepository;
+
     /**
-     * vmNames 기준으로 Prometheus에서 CPU/메모리 사용률을 조회하여
-     * Map<vmName, VmMetricSummaryDto> 형태로 반환
+     * teamId 필터링 포함 버전
      */
-    public Map<String, VmMetricSummaryDto> getMetricsForVmNames(List<String> vmNames) {
+    public Map<String, VmMetricSummaryDto> getMetricsForVmNames(
+            List<String> vmNames,
+            Long teamId     // ⭐ 추가된 파라미터
+    ) {
 
-        // 기본값: 모두 hasMetrics = false
+        // 기본 결과 초기화
         Map<String, VmMetricSummaryDto> result = new HashMap<>();
-        vmNames.forEach(name -> result.put(
-                name,
-                VmMetricSummaryDto.builder()
-                        .hasMetrics(false)
-                        .cpuUsage(null)
-                        .memoryUsage(null)
-                        .build()
-        ));
+        if (vmNames != null) {
+            vmNames.forEach(name ->
+                    result.put(name, VmMetricSummaryDto.builder()
+                            .hasMetrics(false)
+                            .cpuUsage(null)
+                            .memoryUsage(null)
+                            .build())
+            );
+        }
 
-        // ✅ 1) CPU 사용률 (node_exporter 기준 예시)
-        //    avg(rate(node_cpu_seconds_total{mode!="idle"}[5m])) by (instance)
-        String cpuQuery = "avg(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) by (instance)";
+        if (vmNames == null || vmNames.isEmpty()) {
+            log.info("[PrometheusMetrics] vmNames empty. return default.");
+            return result;
+        }
 
-        // ✅ 2) 메모리 사용률 (1 - MemAvailable/MemTotal)
-        String memQuery = "1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)";
+        // ⭐ 1) teamId 필터 적용된 vm_instance 조회
+        List<VmInstance> vmInstances =
+                (teamId == null)
+                        ? vmInstanceRepository.findByNameIn(vmNames)
+                        : vmInstanceRepository.findByNameInAndTeamId(vmNames, teamId);
+
+        if (vmInstances.isEmpty()) {
+            log.info("[PrometheusMetrics] vmInstances empty. vmNames={}, teamId={}", vmNames, teamId);
+            return result;
+        }
+
+        List<Long> vmInstanceIds = vmInstances.stream()
+                .map(VmInstance::getId)
+                .toList();
+
+        log.info("[PrometheusMetrics] vmInstances size={}, ids={}", vmInstances.size(), vmInstanceIds);
+
+        // ⭐ 2) metric_target 조회 (active + NODE_EXPORTER)
+        List<MetricTarget> targets =
+                metricTargetRepository.findByVmInstanceIdInAndActiveTrue(vmInstanceIds);
+
+        Map<Long, MetricTarget> metricTargets = targets.stream()
+                .filter(mt -> "NODE_EXPORTER".equalsIgnoreCase(mt.getExporterType()))
+                .collect(Collectors.toMap(
+                        MetricTarget::getVmInstanceId,
+                        Function.identity(),
+                        (a, b) -> a
+                ));
+
+        if (metricTargets.isEmpty()) {
+            log.info("[PrometheusMetrics] no MetricTarget found for teamId={}", teamId);
+        }
+
+        // ⭐ 3) instance → vmName 매핑
+        Map<String, String> instanceToVmName = new HashMap<>();
+
+        for (VmInstance v : vmInstances) {
+            MetricTarget mt = metricTargets.get(v.getId());
+            if (mt != null && mt.getEndpoint() != null) {
+                instanceToVmName.put(mt.getEndpoint(), v.getName());
+            }
+        }
+
+        log.info("[PrometheusMetrics] instanceToVmName = {}", instanceToVmName);
+
+        if (instanceToVmName.isEmpty()) {
+            return result;
+        }
+
+        // ⭐ 4) Prometheus 쿼리
+        String cpuQuery =
+                "avg(rate(node_cpu_seconds_total{job=\"node-exporter\",mode!=\"idle\"}[5m])) by (instance)";
+        String memQuery =
+                "1 - (node_memory_MemAvailable_bytes{job=\"node-exporter\"} / node_memory_MemTotal_bytes{job=\"node-exporter\"})";
 
         try {
-            // ----- CPU -----
+            // CPU
             String cpuJson = prometheusClient.query(cpuQuery);
             if (cpuJson != null) {
-                Map<String, Double> cpuByInstance = parseVectorResult(cpuJson, "instance");
-                mergeCpuUsage(result, cpuByInstance);
+                Map<String, Double> cpuByInstance = parseVector(cpuJson);
+                mergeCpu(result, cpuByInstance, instanceToVmName);
             }
 
-            // ----- 메모리 -----
+            // Memory
             String memJson = prometheusClient.query(memQuery);
             if (memJson != null) {
-                Map<String, Double> memByInstance = parseVectorResult(memJson, "instance");
-                mergeMemoryUsage(result, memByInstance);
+                Map<String, Double> memByInstance = parseVector(memJson);
+                mergeMem(result, memByInstance, instanceToVmName);
             }
 
         } catch (Exception e) {
-            log.warn("Prometheus 메트릭 파싱 중 오류 발생", e);
+            log.warn("[PrometheusMetrics] Prometheus 조회 중 오류", e);
         }
 
         return result;
     }
 
+
     /**
-     * Prometheus HTTP API (query) 응답(JSON)에서
-     * data.result[*].metric[labelKey], data.result[*].value[1] 을 파싱하여
-     * Map<labelValue, value> 로 반환.
-     *
-     * 예:
-     *  - labelKey = "instance"
+     * Prometheus 응답 파싱
      */
-    private Map<String, Double> parseVectorResult(String json, String labelKey) throws IOException {
-        Map<String, Double> out = new HashMap<>();
+    private Map<String, Double> parseVector(String json) throws IOException {
+        Map<String, Double> map = new HashMap<>();
 
         JsonNode root = objectMapper.readTree(json);
-        JsonNode resultArray = root.path("data").path("result");
+        JsonNode result = root.path("data").path("result");
 
-        if (!resultArray.isArray()) {
-            return out;
+        if (!result.isArray()) {
+            return map;
         }
 
-        for (JsonNode node : resultArray) {
-            String labelValue = node.path("metric").path(labelKey).asText(null);
-            JsonNode valueNode = node.path("value");
+        for (JsonNode e : result) {
+            String instance = e.path("metric").path("instance").asText(null);
+            JsonNode valueArr = e.path("value");
 
-            if (labelValue == null || !valueNode.isArray() || valueNode.size() < 2) {
+            if (instance == null || !valueArr.isArray() || valueArr.size() < 2) {
                 continue;
             }
 
-            double value = valueNode.get(1).asDouble();
-            out.put(labelValue, value);
+            double value = valueArr.get(1).asDouble();
+            map.put(instance, value);
         }
 
-        return out;
+        return map;
     }
 
-    /**
-     * CPU 메트릭을 VmMetricSummaryDto에 머지
-     * 현재는 Prometheus "instance" 라벨 값이 vmName 과 같다고 가정.
-     *
-     * ⚠️ instance 값이 "vm1:9100" 처럼 되어 있으면,
-     *    vCenter VM name과의 매핑 로직을 여기에 커스터마이징해야 함.
-     */
-    private void mergeCpuUsage(Map<String, VmMetricSummaryDto> base,
-                               Map<String, Double> cpuByInstance) {
+    private void mergeCpu(Map<String, VmMetricSummaryDto> base,
+                          Map<String, Double> cpu,
+                          Map<String, String> instanceToVmName) {
 
-        cpuByInstance.forEach((instance, cpu) -> {
-            VmMetricSummaryDto dto = base.get(instance);
+        cpu.forEach((instance, value) -> {
+            String vmName = instanceToVmName.get(instance);
+            if (vmName == null) return;
+
+            VmMetricSummaryDto dto = base.get(vmName);
             if (dto != null) {
                 dto.setHasMetrics(true);
-                dto.setCpuUsage(cpu);
+                dto.setCpuUsage(value);
             }
         });
     }
 
-    /**
-     * 메모리 메트릭을 VmMetricSummaryDto에 머지
-     */
-    private void mergeMemoryUsage(Map<String, VmMetricSummaryDto> base,
-                                  Map<String, Double> memByInstance) {
+    private void mergeMem(Map<String, VmMetricSummaryDto> base,
+                          Map<String, Double> mem,
+                          Map<String, String> instanceToVmName) {
 
-        memByInstance.forEach((instance, mem) -> {
-            VmMetricSummaryDto dto = base.get(instance);
+        mem.forEach((instance, value) -> {
+            String vmName = instanceToVmName.get(instance);
+            if (vmName == null) return;
+
+            VmMetricSummaryDto dto = base.get(vmName);
             if (dto != null) {
                 dto.setHasMetrics(true);
-                dto.setMemoryUsage(mem);
+                dto.setMemoryUsage(value);
             }
         });
     }

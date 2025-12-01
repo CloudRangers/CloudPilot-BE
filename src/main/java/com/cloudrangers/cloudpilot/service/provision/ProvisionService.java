@@ -31,6 +31,9 @@ public class ProvisionService {
     private final JobQueueService jobQueueService;
     private final ObjectMapper objectMapper;
 
+
+    // 🔹 catalogId가 null일 때 사용할 기본 Catalog (DB에 실제로 존재하는 ID로 맞춰둘 것)
+    private static final Long DEFAULT_CATALOG_ID = 1L;
     /**
      * VM 프로비저닝 요청 처리 (단일/다중 통합)
      *
@@ -170,6 +173,13 @@ public class ProvisionService {
 
         String purpose = request.getPurpose() != null ? request.getPurpose() : "VM Provisioning";
 
+        // 🔹 catalogId 방어 로직: null이면 기본값 사용
+        Long catalogId = request.getCatalogId();
+        if (catalogId == null) {
+            catalogId = DEFAULT_CATALOG_ID;
+            log.warn("ProvisionRequest.catalogId가 null입니다. 기본 catalogId={} 로 대체합니다.", catalogId);
+        }
+
         return VmProvisionJob.builder()
                 .catalogId(request.getCatalogId())
                 .teamId(ownerTeamId)           // ★ 소유 팀 기준
@@ -204,6 +214,8 @@ public class ProvisionService {
         // 추가 설정
         Map<String, Object> additionalConfig = new LinkedHashMap<>(
                 request.getAdditionalConfig() != null ? request.getAdditionalConfig() : new HashMap<>());
+
+        log.info("[Provision] additionalConfig from UI = {}", additionalConfig); // 🔍 추가
 
         ProvisionJobMessage message = ProvisionJobMessage.builder()
                 .jobId(String.valueOf(jobId))

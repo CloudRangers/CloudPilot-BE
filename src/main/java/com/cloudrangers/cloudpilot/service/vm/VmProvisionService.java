@@ -12,6 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,10 +28,11 @@ public class VmProvisionService {
 
     private final VmInstanceRepository vmInstanceRepository;
     private final ObjectMapper objectMapper;
+    private final MetricTargetRepository metricTargetRepository;   // ✅ 추가
 
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
-     * vm_instance 테이블에만 저장
+     * vm_instance 테이블에 저장
      */
     @Transactional
     public void handleProvisionSuccess(VmProvisionJob job, ProvisionResultMessage result) {
@@ -41,12 +45,11 @@ public class VmProvisionService {
         for (InstanceInfo info : instances) {
             Instant now = Instant.now();
 
-            // IP 결정 (팀 네트워크 IP 한 개)
+            String name = defaultString(info.getName(), "vm-" + job.getId());
             String ip = resolveIp(info);
 
-            // vm_instance 저장
             VmInstance vm = VmInstance.builder()
-                    .name(defaultString(info.getName(), "vm-" + job.getId()))
+                    .name(name)
                     .providerType(defaultString(info.getProviderType(), "VSPHERE"))
                     .zoneId(resolveZoneId(info, job))
                     .lifecycle("running")
@@ -60,49 +63,85 @@ public class VmProvisionService {
                     .createdBy(job.getUserId())
                     .updatedAt(now)
                     .updatedBy(job.getUserId())
-                    .tags(buildTags(info))
+                    .tags(buildTags(info, name, ip))
                     .ip(ip)
                     .build();
 
             VmInstance saved = vmInstanceRepository.save(vm);
 
-            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}, ip={}",
-                    job.getId(), saved.getId(), saved.getName(), saved.getZoneId(), saved.getIp());
+            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, ip={}",
+                    job.getId(), saved.getId(), saved.getName(), saved.getIp());
+
+            // =====================================================================
+            // ✅ node-exporter용 MetricTarget 자동 등록
+            // =====================================================================
+            if (saved.getIp() != null && !saved.getIp().isBlank()) {
+                String endpoint = saved.getIp().trim() + ":9100";
+
+                MetricTarget target = new MetricTarget();
+                // ⚠️ 아래 필드명은 MetricTarget 엔티티에 맞게 사용
+                target.setVmInstanceId(saved.getId());
+                target.setEndpoint(endpoint);
+                target.setExporterType("NODE_EXPORTER");
+                target.setActive(true);
+                target.setCreatedAt(Instant.now());
+                target.setUpdatedAt(Instant.now());
+                // scrapeUrl, labels 컬럼이 있으면 세팅 / 없으면 이 두 줄 지워도 됨
+//                try {
+//                    target.setScrapeUrl(null);
+//                } catch (NoSuchMethodError | RuntimeException ignored) {}
+//                try {
+//                    target.setLabels(null);
+//                } catch (NoSuchMethodError | RuntimeException ignored) {}
+//
+//                target.setActive(true);
+//                target.setCreatedAt(Instant.now());
+//                target.setUpdatedAt(Instant.now());
+
+                metricTargetRepository.save(target);
+
+                log.info("[VmProvisionService] MetricTarget 자동등록 완료. vmInstanceId={}, endpoint={}",
+                        saved.getId(), endpoint);
+            } else {
+                log.warn("[VmProvisionService] MetricTarget 자동등록 스킵 - ip 없음. vmInstanceId={}, name={}",
+                        saved.getId(), saved.getName());
+            }
+            // =====================================================================
         }
     }
 
     private Long resolveZoneId(InstanceInfo info, VmProvisionJob job) {
-        if (info.getZoneId() != null) {
-            return info.getZoneId();
-        }
-        if (job.getZoneId() != null) {
-            return job.getZoneId().longValue();
-        }
+        if (info.getZoneId() != null) return info.getZoneId();
+        if (job.getZoneId() != null) return job.getZoneId().longValue();
         return null;
     }
 
     /**
-     * vm_instance.tags 필드에 externalId / ip / osType / nicAddresses 등 JSON 저장
+     * vm_instance.tags 필드에 저장할 통일된 태그 구조
      */
-    private String buildTags(InstanceInfo info) {
+    private String buildTags(InstanceInfo info, String vmName, String primaryIp) {
         Map<String, Object> m = new LinkedHashMap<>();
 
-        if (info.getExternalId() != null) {
-            m.put("externalId", info.getExternalId());
-        }
-        if (info.getIpAddress() != null) {
-            m.put("ipAddress", info.getIpAddress());
-        }
-        if (info.getOsType() != null) {
-            m.put("osType", info.getOsType());
-        }
-        if (info.getNicAddresses() != null && !info.getNicAddresses().isBlank()) {
-            m.put("nicAddresses", info.getNicAddresses());
+        if (info.getExternalId() != null && !info.getExternalId().isBlank()) {
+            m.put("externalId", info.getExternalId().trim());
         }
 
-        if (m.isEmpty()) {
-            return null;
+        m.put("vmName", vmName);
+
+        if (primaryIp != null && !primaryIp.isBlank()) {
+            m.put("primaryIp", primaryIp.trim());
         }
+
+        List<String> nicIps = parseNicAddresses(info.getNicAddresses());
+        if (!nicIps.isEmpty()) {
+            m.put("nicIps", nicIps);
+        }
+
+        if (info.getOsType() != null && !info.getOsType().isBlank()) {
+            m.put("osType", info.getOsType().trim());
+        }
+
+        if (m.isEmpty()) return null;
 
         try {
             return objectMapper.writeValueAsString(m);
@@ -113,9 +152,6 @@ public class VmProvisionService {
         }
     }
 
-    /**
-     * "172.16.0.10,172.16.0.11" → ["172.16.0.10", "172.16.0.11"]
-     */
     private List<String> parseNicAddresses(String nicAddresses) {
         List<String> result = new ArrayList<>();
         if (nicAddresses == null || nicAddresses.isBlank()) {
@@ -132,11 +168,6 @@ public class VmProvisionService {
         return result;
     }
 
-    /**
-     * 팀 네트워크용 IP 결정 로직
-     * 1) ipAddress 가 있으면 그걸 사용
-     * 2) 없으면 nicAddresses 에서 첫 번째 IP 사용
-     */
     private String resolveIp(InstanceInfo info) {
         if (info.getIpAddress() != null && !info.getIpAddress().isBlank()) {
             return info.getIpAddress().trim();

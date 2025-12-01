@@ -15,7 +15,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.*;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
@@ -34,18 +36,51 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/login", "/auth/refresh").permitAll()
-                        .requestMatchers("/auth/me").authenticated()
-                        .requestMatchers("/admin/**").hasRole("ADMIN")
 
-                        // 6. 패키지 승인 HEAD/LEADER 전용
-                        .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
+                .authorizeHttpRequests(auth -> auth
+
+                        // preflight
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .anyRequest().authenticated()
+
+                        // 로그인 / 리프레시
+                        .requestMatchers("/auth/login", "/auth/refresh").permitAll()
+
+                        // 팀/헤드 정보 (개발 단계에서 오픈)
+                        .requestMatchers(
+                                "/users/me/team",
+                                "/users/me/head",
+                                "/users/me/all-team"
+                        ).permitAll()
+
+                        // 내 정보는 인증 필요
+                        .requestMatchers("/auth/me").authenticated()
+
+                        // 관리자/헤드 권한 필요한 애들
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
+
+                // ✅ OS 이미지 목록: 개발 단계에서는 완전 오픈
+                .requestMatchers(HttpMethod.GET, "/catalog/os-images/**").permitAll()
+
+                // ✅ VM 프로비저닝 생성 요청: 개발 단계에서는 일단 오픈
+                .requestMatchers(HttpMethod.POST, "/provision").permitAll()
+
+                // 🔥 개발 단계 — 모니터링용은 전부 오픈
+                .requestMatchers(
+                        "/api/monitoring/**",
+                        "/monitor/**",
+                        "/ops/v1/**",
+                        "/vcenter/**"
+                ).permitAll()
+
+                // 나머지는 인증 필요
+                .anyRequest().authenticated()
                 )
 
+        // JWT 필터
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+
+                // CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()));
 
         return http.build();
@@ -59,7 +94,7 @@ public class SecurityConfig {
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
-        config.setExposedHeaders(List.of("Set-Cookie"));
+        config.setExposedHeaders(List.of("Set-Cookie", "Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

@@ -1,15 +1,19 @@
+// src/main/java/com/cloudrangers/cloudpilot/monitor/vcenter/controller/VcenterMonitorController.java
 package com.cloudrangers.cloudpilot.monitor.vcenter.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
+import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
 import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
 import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusMetricsService;
 import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterSummaryResponse;
 import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterVmInfoDto;
+import com.cloudrangers.cloudpilot.monitor.vcenter.dto.DemoVmDto;
 import com.cloudrangers.cloudpilot.monitor.vcenter.service.VcenterMonitorService;
+import com.cloudrangers.cloudpilot.dto.monitor.VCenterVmResponse;
+import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
+
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
@@ -20,60 +24,67 @@ import java.util.Map;
 public class VcenterMonitorController {
 
     private final VcenterMonitorService vcenterMonitorService;
-
-    // ✅ Prometheus 메트릭 서비스 주입
     private final PrometheusMetricsService prometheusMetricsService;
+    private final VmInstanceRepository vmInstanceRepository;   // ✅ 추가
 
-    /**
-     * vCenter VM 요약 정보
-     *
-     * GET /monitor/vcenter/summary
-     */
     @GetMapping("/summary")
     public ApiResponse<VcenterSummaryResponse> getSummary() {
-        VcenterSummaryResponse summary = vcenterMonitorService.getSummary();
-        return ApiResponse.success(summary);
+        return ApiResponse.success(vcenterMonitorService.getSummary());
     }
 
     /**
-     * vCenter VM 전체 목록
-     *
-     * GET /monitor/vcenter/vms
+     * ✅ vCenter VM 리스트 (AdminPage 테이블용)
      */
     @GetMapping("/vms")
-    public ApiResponse<List<VcenterVmInfoDto>> getVmList() {
-        List<VcenterVmInfoDto> vms = vcenterMonitorService.getVmList();
-        return ApiResponse.success(vms);
-    }
+    public ApiResponse<List<VCenterVmResponse>> getVmList() {
 
-    /**
-     * vCenter VM 목록 기준으로 Prometheus 메트릭 요약 조회
-     *
-     * GET /monitor/vcenter/metrics
-     *
-     * 반환 형태:
-     *  {
-     *    "data": {
-     *      "vm-name-1": { "hasMetrics": true, "cpuUsage": 0.53, "memoryUsage": 0.42 },
-     *      "vm-name-2": { "hasMetrics": false, "cpuUsage": null, "memoryUsage": null },
-     *      ...
-     *    }
-     *  }
-     */
-    @GetMapping("/metrics")
-    public ApiResponse<Map<String, VmMetricSummaryDto>> getVmMetrics() {
+        // TODO: 필요 시 providerType == "VCENTER" 로 필터링
+        List<VmInstance> vms = vmInstanceRepository.findAll();
 
-        // 1) vCenter VM 목록에서 이름만 추출
-        List<VcenterVmInfoDto> vms = vcenterMonitorService.getVmList();
-        List<String> names = vms.stream()
-                .map(VcenterVmInfoDto::getName)
-                .distinct()
+        List<VCenterVmResponse> dtoList = vms.stream()
+                .map(VCenterVmResponse::from)
                 .toList();
 
-        // 2) Prometheus에서 VM 단위 메트릭 조회
+        return ApiResponse.success(dtoList);
+    }
+
+    @GetMapping("/metrics")
+    public ApiResponse<Map<String, VmMetricSummaryDto>> getVmMetrics(
+            @RequestParam(required = false) Long teamId
+    ) {
+        List<VcenterVmInfoDto> vms = vcenterMonitorService.getVmList();
+        List<String> names = vms.stream().map(VcenterVmInfoDto::getName).distinct().toList();
+
         Map<String, VmMetricSummaryDto> metrics =
-                prometheusMetricsService.getMetricsForVmNames(names);
+                prometheusMetricsService.getMetricsForVmNames(names, teamId);
 
         return ApiResponse.success(metrics);
+    }
+
+    @GetMapping("/demo-vms")
+    public ApiResponse<List<DemoVmDto>> getDemoVms(
+            @RequestParam(required = false) Long teamId
+    ) {
+        List<String> demoVmNames = List.of(
+                "Vmprovision-db-ip-test",
+                "teamA-DB-dev",
+                "harbor-VM",
+                "teamA-ELK"
+        );
+
+        Map<String, VmMetricSummaryDto> metrics =
+                prometheusMetricsService.getMetricsForVmNames(demoVmNames, teamId);
+
+        List<DemoVmDto> result = demoVmNames.stream()
+                .map(name -> {
+                    VmMetricSummaryDto m = metrics.get(name);
+                    if (m == null) {
+                        return new DemoVmDto(name, null, null);
+                    }
+                    return new DemoVmDto(name, m.getCpuUsage(), m.getMemoryUsage());
+                })
+                .toList();
+
+        return ApiResponse.success(result);
     }
 }
