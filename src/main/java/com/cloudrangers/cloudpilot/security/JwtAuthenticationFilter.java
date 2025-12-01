@@ -33,9 +33,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     FilterChain filterChain)
             throws ServletException, IOException {
 
+        String uri = request.getRequestURI();
+        log.info(">>> [JWT-FILTER] Processing URI: {}", uri);
+
+        // ⭐ 로그인, 리프레시, 로그아웃 경로는 토큰 검증을 수행하지 않음
+        if (uri.startsWith("/auth/login") || uri.startsWith("/auth/refresh") || uri.startsWith("/auth/logout")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // ⭐ Authorization 헤더 사용 안함 — 쿠키 ONLY
         String token = resolveToken(request);
 
-        // 1) 토큰 추출 로그
         log.info("🍪 [JWT-FILTER] Extracted Token = {}", token);
 
         if (token == null) {
@@ -43,7 +52,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 2) 블랙리스트 체크
+        // ⭐ 블랙리스트 확인
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Token is blacklisted");
@@ -67,7 +76,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Long teamId = claims.get("teamId", Long.class);
                 String teamName = claims.get("teamName", String.class);
 
-                // 🔥 CustomUserDetails 개선된 생성자 사용
                 CustomUserDetails principal = new CustomUserDetails(
                         userId,
                         empno,
@@ -114,15 +122,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * ⭐ Authorization 헤더 완전 제거
+     * access_token 쿠키 ONLY 사용
+     */
     private String resolveToken(HttpServletRequest request) {
 
-        // 1) Authorization 헤더 우선
-        String header = request.getHeader("Authorization");
-        if (header != null && header.startsWith("Bearer ")) {
-            return header.substring(7);
-        }
-
-        // 2) access_token 쿠키 체크
         Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (Cookie cookie : cookies) {

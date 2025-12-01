@@ -15,9 +15,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.cors.*;
 
 import java.util.List;
 
@@ -59,22 +57,20 @@ public class SecurityConfig {
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
 
-                // ✅ OS 이미지 목록: 개발 단계에서는 완전 오픈
-                .requestMatchers(HttpMethod.GET, "/catalog/os-images/**").permitAll()
+                        // ⭐ OPTIONS Preflight 허용
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // ✅ VM 프로비저닝 생성 요청: 개발 단계에서는 일단 오픈
-                .requestMatchers(HttpMethod.POST, "/provision").permitAll()
+                        // ⭐ 리스트 조회는 공개
+                        .requestMatchers("/api/packages").permitAll()
+                        .requestMatchers("/vms").permitAll()
 
-                // 🔥 개발 단계 — 모니터링용은 전부 오픈
-                .requestMatchers(
-                        "/api/monitoring/**",
-                        "/monitor/**",
-                        "/ops/v1/**",
-                        "/vcenter/**"
-                ).permitAll()
+                        // ⭐🔥 SSE는 인증 제외 → 반드시 추가
+                        .requestMatchers("/sse/**").permitAll()
 
-                // 나머지는 인증 필요
-                .anyRequest().authenticated()
+                        // ⭐ 설치 요청은 로그인 필요!
+                        .requestMatchers(HttpMethod.POST, "/packages/install").authenticated()
+
+                        .anyRequest().authenticated()
                 )
 
         // JWT 필터
@@ -90,14 +86,20 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOrigins(List.of("http://localhost:3000"));
+        config.setAllowedOriginPatterns(List.of("http://localhost:3000"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+
+        // ⭐ Authorization 명시적으로 추가 — 매우 중요!!
+        config.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Requested-With"));
+
         config.setAllowCredentials(true);
+
+        // ⭐ Authorization, Set-Cookie 모두 노출
         config.setExposedHeaders(List.of("Set-Cookie", "Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/sse/**", config);
         return source;
     }
 

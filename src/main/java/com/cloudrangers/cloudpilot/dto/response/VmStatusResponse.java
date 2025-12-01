@@ -1,64 +1,101 @@
 package com.cloudrangers.cloudpilot.dto.response;
 
+import com.cloudrangers.cloudpilot.domain.catalog.OsImage;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
-import lombok.Value;
+import lombok.Getter;
 
 import java.time.Instant;
 
-/**
- * VM 상태 조회용 DTO
- *
- * 🔗 엔티티: com.cloudrangers.cloudpilot.domain.vm.VmInstance
- *  - 실제 DDL(vm_instance)에 존재하는 필드 기준으로만 매핑
- *  - 과거에 사용하던 providerType, zoneId, ip 등은 제거됨
- */
-@Value
-@Builder
+@Getter
 public class VmStatusResponse {
 
-    private Long id;
-    private String name;
+    private final Long id;
+    private final String name;
+    private final String providerType;
+    private final Long zoneId;
+    private final String status;
+    private final String powerState;
+    private final Instant createdAt;
 
-    // 🔄 CHANGED: providerType 제거됨 (엔티티/DDL에 없음)
-    // private String providerType;
+    private final Integer vcpu;
+    private final Integer memoryMb;
+    private final Integer rootDiskGb;
 
-    private Integer vcpu;
-    private Integer memoryMb;
-    private Integer rootDiskGb;
+    private final String ip;
+    private final String osImageName;
+    private final String osType;
 
-    private String powerState;   // running / stopped / terminated
-    private String lifecycle;    // creating / active / failed / deleting
+    @Builder
+    public VmStatusResponse(Long id,
+                            String name,
+                            String providerType,
+                            Long zoneId,
+                            String status,
+                            String powerState,
+                            Instant createdAt,
+                            Integer vcpu,
+                            Integer memoryMb,
+                            Integer rootDiskGb,
+                            String ip,
+                            String osImageName,
+                            String osType) {
+        this.id = id;
+        this.name = name;
+        this.providerType = providerType;
+        this.zoneId = zoneId;
+        this.status = status;
+        this.powerState = powerState;
+        this.createdAt = createdAt;
+        this.vcpu = vcpu;
+        this.memoryMb = memoryMb;
+        this.rootDiskGb = rootDiskGb;
+        this.ip = ip;
+        this.osImageName = osImageName;
+        this.osType = osType;
+    }
 
-    private Long teamId;
-    private Long createdBy;
+    public static VmStatusResponse fromEntity(VmInstance vm, OsImage osImage) {
+        if (vm == null) return null;
 
-    private Instant createdAt;
-    private Instant updatedAt;
+        String ip = vm.getIp();
+        String osType = null;
 
-    // 🆕 실제 DDL에 존재하는 컬럼
-    private String providerInstanceId; // EC2 instance-id 또는 vSphere VM MOID 등
-    private String tags;               // JSON 문자열 (필요 시 FE에서 파싱 가능)
+        // tags JSON 파싱
+        if (vm.getTags() != null) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode node = mapper.readTree(vm.getTags());
 
-    /**
-     * ✅ 신규 표준 생성 메서드
-     * 엔티티 -> DTO 변환
-     */
-    public static VmStatusResponse from(VmInstance vm) {
+                if (node.has("ipAddress") && (ip == null || ip.isBlank())) {
+                    ip = node.get("ipAddress").asText();
+                }
+                if (node.has("osType")) {
+                    osType = node.get("osType").asText();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
         return VmStatusResponse.builder()
                 .id(vm.getId())
                 .name(vm.getName())
-                .vcpu(vm.getVcpu())
-                .memoryMb(vm.getMemoryMb())
-                .rootDiskGb(vm.getRootDiskGb())
+                .providerType(vm.getProviderType())
+                .zoneId(vm.getZoneId())
+                .status(vm.getLifecycle())
                 .powerState(vm.getPowerState())
                 .lifecycle(vm.getLifecycle())
                 .teamId(vm.getTeamId())
                 .createdBy(vm.getCreatedBy())
                 .createdAt(vm.getCreatedAt())
-                .updatedAt(vm.getUpdatedAt())
-                .providerInstanceId(vm.getProviderInstanceId())
-                .tags(vm.getTags())
+                .vcpu(vm.getVcpu())
+                .memoryMb(vm.getMemoryMb())
+                .rootDiskGb(vm.getRootDiskGb())
+                .ip(ip)
+                .osImageName(osImage != null ? osImage.getName() : null)
+                .osType(osType)
                 .build();
     }
 

@@ -33,92 +33,103 @@ public class VmProvisionService {
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
      * vm_instance 테이블에 저장
+     *
+     * - tf_run_id  : 워커가 result.tfRunId에 넣어준 값 (없으면 null)
+     * - state_uri  : BE에서 jobId 기준으로 생성 (/tmp/terraform/{jobId}/terraform.tfstate)
      */
     @Transactional
     public void handleProvisionSuccess(VmProvisionJob job, ProvisionResultMessage result) {
         List<InstanceInfo> instances = result.getInstances();
+
+        log.info("[VmProvisionService] handleProvisionSuccess 호출. jobId={}, resultStatus={}, step={}, instanceCount={}",
+                job.getId(),
+                result.getStatus(),
+                result.getStep(),
+                (instances == null ? 0 : instances.size()));
+
         if (instances == null || instances.isEmpty()) {
             log.warn("[VmProvisionService] Job {} - instances 비어 있음. vm_instance 저장 스킵", job.getId());
             return;
         }
 
-        for (InstanceInfo info : instances) {
-            Instant now = Instant.now();
+        Long tfRunId = result.getTfRunId();
+        String stateUri = buildTerraformStateUri(job.getId());
 
-            String name = defaultString(info.getName(), "vm-" + job.getId());
-            String ip = resolveIp(info);
+        log.info("[VmProvisionService] jobId={}, tfRunId={}, stateUri={}",
+                job.getId(), tfRunId, stateUri);
 
-            VmInstance vm = VmInstance.builder()
-                    .name(name)
-                    .providerType(defaultString(info.getProviderType(), "VSPHERE"))
-                    .zoneId(resolveZoneId(info, job))
-                    .lifecycle("running")
-                    .powerState("ON")
-                    .vcpu(info.getCpuCores())
-                    .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null)
-                    .rootDiskGb(info.getDiskGb())
-                    .ownerUserId(job.getUserId())
-                    .teamId(job.getTeamId())
-                    .createdAt(now)
-                    .createdBy(job.getUserId())
-                    .updatedAt(now)
-                    .updatedBy(job.getUserId())
-                    .tags(buildTags(info, name, ip))
-                    .ip(ip)
-                    .build();
+        try {
+            for (InstanceInfo info : instances) {
+                Instant now = Instant.now();
 
-            VmInstance saved = vmInstanceRepository.save(vm);
+                String name = defaultString(info.getName(), "vm-" + job.getId());
+                String ip = resolveIp(info);
+                String providerInstanceId = normalizeBlankToNull(info.getExternalId());
 
-            log.info("[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, ip={}",
-                    job.getId(), saved.getId(), saved.getName(), saved.getIp());
+                Long zoneId = resolveZoneId(info, job);
 
-            // =====================================================================
-            // ✅ node-exporter용 MetricTarget 자동 등록
-            // =====================================================================
-            if (saved.getIp() != null && !saved.getIp().isBlank()) {
-                String endpoint = saved.getIp().trim() + ":9100";
+                log.debug("[VmProvisionService] vm_instance 생성 준비. jobId={}, name={}, ip={}, zoneId={}, providerInstanceId={}",
+                        job.getId(), name, ip, zoneId, providerInstanceId);
 
-                MetricTarget target = new MetricTarget();
-                // ⚠️ 아래 필드명은 MetricTarget 엔티티에 맞게 사용
-                target.setVmInstanceId(saved.getId());
-                target.setEndpoint(endpoint);
-                target.setExporterType("NODE_EXPORTER");
-                target.setActive(true);
-                target.setCreatedAt(Instant.now());
-                target.setUpdatedAt(Instant.now());
-                // scrapeUrl, labels 컬럼이 있으면 세팅 / 없으면 이 두 줄 지워도 됨
-//                try {
-//                    target.setScrapeUrl(null);
-//                } catch (NoSuchMethodError | RuntimeException ignored) {}
-//                try {
-//                    target.setLabels(null);
-//                } catch (NoSuchMethodError | RuntimeException ignored) {}
-//
-//                target.setActive(true);
-//                target.setCreatedAt(Instant.now());
-//                target.setUpdatedAt(Instant.now());
+                VmInstance vm = VmInstance.builder()
+                        .name(name)
+                        .providerType(defaultString(info.getProviderType(), "VSPHERE"))
 
-                metricTargetRepository.save(target);
+                        // 위치/소유 정보
+                        .zoneId(zoneId)
+                        .ownerUserId(job.getUserId())
+                        .teamId(job.getTeamId())
 
-                log.info("[VmProvisionService] MetricTarget 자동등록 완료. vmInstanceId={}, endpoint={}",
-                        saved.getId(), endpoint);
-            } else {
-                log.warn("[VmProvisionService] MetricTarget 자동등록 스킵 - ip 없음. vmInstanceId={}, name={}",
-                        saved.getId(), saved.getName());
+                        // 라이프사이클/전원 상태
+                        .lifecycle("running")
+                        .powerState("ON")
+
+                        // 스펙
+                        .vcpu(info.getCpuCores())
+                        .memoryMb(info.getMemoryGb() != null ? info.getMemoryGb() * 1024 : null)
+                        .rootDiskGb(info.getDiskGb())
+
+                        // 연동 정보
+                        .tfRunId(tfRunId)
+                        .stateUri(stateUri)
+
+                        // 네트워크
+                        .ip(ip)
+
+                        // 태그(JSON)
+                        .tags(buildTags(info, name, ip))
+
+                        // 메타데이터
+                        .createdAt(now)
+                        .createdBy(job.getUserId())
+                        .updatedAt(now)
+                        .updatedBy(job.getUserId())
+                        .build();
+
+                VmInstance saved = vmInstanceRepository.save(vm);
+
+                log.info(
+                        "[VmProvisionService] vm_instance 저장 완료. jobId={}, vmInstanceId={}, name={}, zoneId={}, ip={}, tfRunId={}, stateUri={}",
+                        job.getId(), saved.getId(), saved.getName(), saved.getZoneId(), saved.getIp(),
+                        saved.getTfRunId(), saved.getStateUri()
+                );
             }
-            // =====================================================================
+        } catch (Exception e) {
+            log.error("[VmProvisionService] vm_instance 저장 중 예외 발생. jobId={}", job.getId(), e);
+            throw e; // 트랜잭션 롤백되게 그대로 다시 던짐
         }
     }
 
     private Long resolveZoneId(InstanceInfo info, VmProvisionJob job) {
-        if (info.getZoneId() != null) return info.getZoneId();
-        if (job.getZoneId() != null) return job.getZoneId().longValue();
+        if (info.getZoneId() != null) {
+            return info.getZoneId();
+        }
+        if (job.getZoneId() != null) {
+            return job.getZoneId().longValue();
+        }
         return null;
     }
 
-    /**
-     * vm_instance.tags 필드에 저장할 통일된 태그 구조
-     */
     private String buildTags(InstanceInfo info, String vmName, String primaryIp) {
         Map<String, Object> m = new LinkedHashMap<>();
 
@@ -135,6 +146,10 @@ public class VmProvisionService {
         List<String> nicIps = parseNicAddresses(info.getNicAddresses());
         if (!nicIps.isEmpty()) {
             m.put("nicIps", nicIps);
+        }
+
+        if (info.getOsType() != null && !info.getOsType().isBlank()) {
+            m.put("osType", info.getOsType().trim());
         }
 
         if (info.getOsType() != null && !info.getOsType().isBlank()) {
@@ -183,5 +198,18 @@ public class VmProvisionService {
 
     private String defaultString(String value, String def) {
         return (value == null || value.isBlank()) ? def : value;
+    }
+
+    private String normalizeBlankToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String buildTerraformStateUri(Long jobId) {
+        if (jobId == null) {
+            return null;
+        }
+        return "/tmp/terraform/" + jobId + "/terraform.tfstate";
     }
 }

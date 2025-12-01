@@ -1,5 +1,6 @@
 package com.cloudrangers.cloudpilot.config;
 
+import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,6 +11,7 @@ import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.DefaultClassMapper;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,6 +19,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @EnableRabbit
 @Configuration
@@ -61,7 +66,23 @@ public class RabbitMQConfig {
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
-        return new Jackson2JsonMessageConverter(objectMapper);
+        Jackson2JsonMessageConverter converter = new Jackson2JsonMessageConverter(objectMapper);
+
+        // ⭐ __TypeId__ 헤더를 worker DTO → API DTO로 매핑
+        DefaultClassMapper classMapper = new DefaultClassMapper();
+        classMapper.setTrustedPackages("*");
+
+        Map<String, Class<?>> idClassMapping = new HashMap<>();
+        // worker 가 보낸 __TypeId__ 를 API 쪽 DTO로 역직렬화
+        idClassMapping.put(
+                "com.cloudrangers.cloudpilotworker.dto.ProvisionResultMessage",
+                ProvisionResultMessage.class
+        );
+        classMapper.setIdClassMapping(idClassMapping);
+
+        converter.setClassMapper(classMapper);
+
+        return converter;
     }
 
     @Bean
@@ -188,7 +209,6 @@ public class RabbitMQConfig {
                 .with(packageRoutingKey);
     }
 
-
     // ================================================================
     //           패키지 설치 Result Queue / Exchange / Binding
     // ================================================================
@@ -220,4 +240,33 @@ public class RabbitMQConfig {
                 .to(exchange)
                 .with(packageResultRoutingKey);
     }
+
+    // === Package Install Progress Queue / Exchange / Binding ===
+
+    @Bean
+    public Queue progressQueue(
+            @Value("${rabbitmq.queue.package-install-progress.name}") String name
+    ) {
+        return QueueBuilder.durable(name).build();
+    }
+
+    @Bean
+    public TopicExchange progressExchange(
+            @Value("${rabbitmq.exchange.package-install-progress.name}") String name
+    ) {
+        return new TopicExchange(name, true, false);
+    }
+
+    @Bean
+    public Binding progressBinding(
+            @Qualifier("progressQueue") Queue queue,
+            @Qualifier("progressExchange") TopicExchange exchange,
+            @Value("${rabbitmq.routing-key.package-install-progress.pattern}") String routingKey
+    ) {
+        return BindingBuilder
+                .bind(queue)
+                .to(exchange)
+                .with(routingKey);
+    }
+
 }

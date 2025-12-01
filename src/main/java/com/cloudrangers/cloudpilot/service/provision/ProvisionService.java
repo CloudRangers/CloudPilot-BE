@@ -66,11 +66,17 @@ public class ProvisionService {
                 VmProvisionJob saved = provisionJobRepository.save(job);
                 jobIds.add(saved.getId());
 
-                // 3. 큐에 메시지 발행 (항상 vmCount=1로 고정)
-                publishJobMessage(request, userId, ownerTeamId, saved.getId(), vmName, batchId, i);
+                // ★ 2-1. jobId 기반으로 Terraform state URI 미리 계산
+                String stateUri = buildTerraformStateUri(saved.getId());
 
-                log.debug("Job created: id={}, vmName={}, batch={}, index={}/{}",
-                        saved.getId(), vmName, batchId != null ? batchId.substring(0, 8) : "single", i + 1, vmCount);
+                // 3. 큐에 메시지 발행 (항상 vmCount=1로 고정)
+                publishJobMessage(request, userId, ownerTeamId, saved.getId(), vmName, batchId, i, stateUri);
+
+                log.debug("Job created: id={}, vmName={}, batch={}, index={}/{} (stateUri={})",
+                        saved.getId(), vmName,
+                        batchId != null ? batchId.substring(0, 8) : "single",
+                        i + 1, vmCount,
+                        stateUri);
             }
 
             log.info("Provision job(s) created successfully. count={}, jobIds={}", vmCount, jobIds);
@@ -201,7 +207,9 @@ public class ProvisionService {
      */
     private void publishJobMessage(
             ProvisionRequest request, Long userId, Long ownerTeamId,
-            Long jobId, String vmName, String batchId, int index) {
+            Long jobId, String vmName, String batchId, int index,
+            String stateUri // ★ 새로 추가: Terraform state URI
+    ) {
 
         // 태그 생성
         Map<String, String> tags = request.getTags() != null
@@ -215,25 +223,31 @@ public class ProvisionService {
         Map<String, Object> additionalConfig = new LinkedHashMap<>(
                 request.getAdditionalConfig() != null ? request.getAdditionalConfig() : new HashMap<>());
 
-        log.info("[Provision] additionalConfig from UI = {}", additionalConfig); // 🔍 추가
+        // ★ stateUri도 additionalConfig에 같이 넣어두면 워커/AI 쪽에서 참조하기 편함
+        if (stateUri != null && !stateUri.isBlank()) {
+            additionalConfig.putIfAbsent("terraform_state_uri", stateUri);
+        }
 
         ProvisionJobMessage message = ProvisionJobMessage.builder()
                 .jobId(String.valueOf(jobId))
-                .userId(userId)
-                .teamId(ownerTeamId)                 // ★ 소유 팀 기준
-                .zoneId(request.getZoneId())
+                .action("apply")   // 생성 요청은 항상 apply
                 .providerType(request.getProviderType() != null
                         ? request.getProviderType()
                         : ProviderType.VSPHERE)
-                .action("apply")
-                .request(request)
-                .vmCount(1)
+                .zoneId(request.getZoneId() != null
+                        ? request.getZoneId().longValue()
+                        : null)
+                .userId(userId)
+                .teamId(ownerTeamId)                 // ★ 소유 팀 기준
+                .vmCount(1)                          // 각 Job은 VM 1개만
                 .vmName(vmName)
                 .cpuCores(request.getCpuCores())
                 .memoryGb(request.getMemoryGb())
                 .diskGb(request.getDiskGb())
                 .tags(tags)
                 .additionalConfig(additionalConfig)
+                .request(request)
+                .stateUri(stateUri)                  // ★ 메시지에도 stateUri 실어 보냄
                 .build();
 
         jobQueueService.pushJob(message, false);
@@ -278,5 +292,16 @@ public class ProvisionService {
             throw new ProvisionException("zoneId 범위 초과(SMALLINT): " + v);
         }
         return v.shortValue();
+    }
+
+    /**
+     * ★ jobId 기준 Terraform state URI 생성
+     *   - 워커에서 기본값으로도 이렇게 쓰고 있으니까 BE에서도 동일 규칙으로 맞춰줌
+     */
+    private String buildTerraformStateUri(Long jobId) {
+        if (jobId == null) {
+            return null;
+        }
+        return "/tmp/terraform/" + jobId + "/terraform.tfstate";
     }
 }
