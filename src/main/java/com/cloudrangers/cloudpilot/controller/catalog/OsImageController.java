@@ -34,12 +34,12 @@ public class OsImageController {
     @PreAuthorize("isAuthenticated()")
     @GetMapping
     public ApiResponse<PageResponse<OsImageResponse>> list(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size,
-            @RequestParam(required = false) Long providerId,
-            @RequestParam(required = false) Long zoneId,
-            @RequestParam(required = false) String q,
-            @RequestParam(required = false) String sort
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "50") int size,
+            @RequestParam(name = "providerId", required = false) Long providerId,
+            @RequestParam(name = "zoneId", required = false) Long zoneId,
+            @RequestParam(name = "q", required = false) String q,
+            @RequestParam(name = "sort", required = false) String sort
     ) {
         PageResponse<OsImageResponse> result =
                 osImageQueryService.getOsImages(page, size, providerId, zoneId, q, sort);
