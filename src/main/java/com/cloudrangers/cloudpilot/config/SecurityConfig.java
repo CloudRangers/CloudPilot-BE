@@ -34,9 +34,26 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
+
                 .authorizeHttpRequests(auth -> auth
+
+                        // preflight
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                        // 로그인 / 리프레시
                         .requestMatchers("/auth/login", "/auth/refresh").permitAll()
+
+                        // 팀/헤드 정보 (개발 단계에서 오픈)
+                        .requestMatchers(
+                                "/users/me/team",
+                                "/users/me/head",
+                                "/users/me/all-team"
+                        ).permitAll()
+
+                        // 내 정보는 인증 필요
                         .requestMatchers("/auth/me").authenticated()
+
+                        // 관리자/헤드 권한 필요한 애들
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/packages/approve/**").hasAnyRole("HEAD", "LEADER")
 
@@ -55,7 +72,11 @@ public class SecurityConfig {
 
                         .anyRequest().authenticated()
                 )
+
+        // JWT 필터
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+
+                // CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()));
 
         return http.build();

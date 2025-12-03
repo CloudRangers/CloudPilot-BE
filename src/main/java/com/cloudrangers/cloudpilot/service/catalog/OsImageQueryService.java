@@ -12,7 +12,8 @@ import org.springframework.stereotype.Service;
 
 import static com.cloudrangers.cloudpilot.repository.catalog.OsImageSpecs.*;
 
-@Service @RequiredArgsConstructor
+@Service
+@RequiredArgsConstructor
 public class OsImageQueryService {
 
     private final OsImageRepository osImageRepository;
@@ -31,7 +32,6 @@ public class OsImageQueryService {
         var pageResult = osImageRepository.findAll(spec, pageable)
                 .map(OsImageResponse::fromEntity);
 
-        // 결과 없음도 200으로 빈 리스트 내려도 되지만, 설계서가 404를 원하면 아래 사용
         if (pageResult.getTotalElements() == 0) {
             throw new CatalogNotFoundException("OS_IMAGE_NOT_FOUND", "조건에 맞는 OS 이미지가 없습니다.");
         }
@@ -52,3 +52,4 @@ public class OsImageQueryService {
         return "desc".equalsIgnoreCase(dir) ? Sort.by(prop).descending() : Sort.by(prop).ascending();
     }
 }
+
