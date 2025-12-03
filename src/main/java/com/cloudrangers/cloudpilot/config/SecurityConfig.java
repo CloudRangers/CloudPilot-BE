@@ -41,7 +41,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                         // 로그인 / 리프레시
-                        .requestMatchers("/auth/login", "/auth/refresh").permitAll()
+                        .requestMatchers("/auth/login", "/auth/logout", "/auth/refresh").permitAll()
 
                         // 팀/헤드 정보 (개발 단계에서 오픈)
                         .requestMatchers(
@@ -50,7 +50,6 @@ public class SecurityConfig {
                                 "/users/me/all-team"
                         ).permitAll()
 
-                        // 내 정보는 인증 필요
                         .requestMatchers("/auth/me").authenticated()
 
                         // 관리자/헤드 권한 필요한 애들
@@ -86,7 +85,11 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        config.setAllowedOriginPatterns(List.of("http://localhost:3000"));
+        config.setAllowedOriginPatterns(List.of(
+                "http://localhost:3000",
+                "https://n8n.cloudpilot.world",
+                "https://www.cloudpilot.world"
+        ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
 
         // ⭐ Authorization 명시적으로 추가 — 매우 중요!!
