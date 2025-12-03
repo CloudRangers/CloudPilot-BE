@@ -20,4 +20,6 @@ public interface VmInstanceRepository
 
     // ✅ 마이페이지용: 팀 기준 전체 VM 조회
     List<VmInstance> findByTeamId(Long teamId);
+
+    List<VmInstance> findByTeamIdAndLifecycleIgnoreCase(Long teamId, String running);
 }

@@ -4,6 +4,7 @@ package com.cloudrangers.cloudpilot.service.user;
 import com.cloudrangers.cloudpilot.domain.user.User;
 import com.cloudrangers.cloudpilot.domain.user.UserRole;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
+// import com.cloudrangers.cloudpilot.domain.vm.VmLifecycle; // enum 사용 시
 import com.cloudrangers.cloudpilot.dto.user.HeadMyPageResponse;
 import com.cloudrangers.cloudpilot.dto.user.HeadTeamMemberResponse;
 import com.cloudrangers.cloudpilot.dto.user.HeadTeamResponse;
@@ -33,7 +34,7 @@ public class MyPageService {
     private final UserRepository userRepository;
     private final UserRoleRepository userRoleRepository;
     private final VmInstanceRepository vmInstanceRepository;
-    private final ObjectMapper objectMapper;   // ✅ 주입
+    private final ObjectMapper objectMapper;
 
     // ===== 공통 유틸 =====
 
@@ -50,7 +51,7 @@ public class MyPageService {
             }
         } catch (Exception e) {
             // 파싱 실패해도 마이페이지 전체가 깨지지 않도록 조용히 무시
-            // 필요하면 log.warn(...) 추가
+            // TODO: 필요하면 log.warn(...) 추가
         }
         return null;
     }
@@ -62,6 +63,7 @@ public class MyPageService {
      *  - vcpu        : vCPU 개수
      *  - memoryMb    : 메모리 MB
      *  - rootDiskGb  : 디스크 GB
+     *  - powerState  : "POWERED_ON" / "POWERED_OFF" ...
      *  - tags        : JSON 문자열 (osType, ipAddress 등 포함 가능)
      */
     private MyPageVmResponse toVmResponse(VmInstance vm) {
@@ -76,7 +78,6 @@ public class MyPageService {
             updatedAt = LocalDateTime.ofInstant(vm.getUpdatedAt(), ZoneId.systemDefault());
         }
 
-        // ✅ CPU / 메모리 / 디스크 실제 값 사용
         Integer vcpu = vm.getVcpu();
         Integer memoryMb = vm.getMemoryMb();
         Integer diskGb = vm.getRootDiskGb();
@@ -85,17 +86,26 @@ public class MyPageService {
         int memoryGb = memoryMb != null ? memoryMb / 1024 : 0;
         int storageGb = diskGb != null ? diskGb : 0;
 
-        // ✅ tags JSON에서 osType / ipAddress 등 추출 (없으면 null)
+        // tags JSON에서 osType / ipAddress 추출
         String osName = extractFieldFromTags(vm.getTags(), "osType");
         String ip = extractFieldFromTags(vm.getTags(), "ipAddress");
+
+        // ✅ powerState → FE용 status("running"/"stopped"/"pending")로 매핑
+        String powerState = vm.getPowerState(); // 예: "POWERED_ON", "POWERED_OFF"
+        String feStatus;
+        if ("POWERED_ON".equalsIgnoreCase(powerState)) {
+            feStatus = "running";
+        } else if ("POWERED_OFF".equalsIgnoreCase(powerState)) {
+            feStatus = "stopped";
+        } else {
+            feStatus = "pending"; // 생성 중, 에러 등 기타 상태
+        }
 
         return MyPageVmResponse.builder()
                 .id(vm.getId())
                 .name(vm.getName())
-                // providerType: vCenter / On-Prem / Cloud 구분 등으로 활용 가능
                 .type(vm.getProviderType())          // 예: "VCENTER"
-                // powerState: "POWERED_ON", "POWERED_OFF" 등
-                .status(vm.getPowerState())          // 예: "POWERED_ON"
+                .status(feStatus)                    // 프론트에서 사용하는 status
                 .cpu(cpu)
                 .memory(memoryGb)
                 .storage(storageGb)
@@ -120,11 +130,34 @@ public class MyPageService {
                 .anyMatch(r -> roleCode.equalsIgnoreCase(r.getCode()));
     }
 
+    /**
+     * ✅ 공통 헬퍼
+     * - 특정 teamId에 속한 VM 중에서
+     * - vm_instance.lifecycle = 'RUNNING' 인 VM만 조회
+     * - 그 결과를 MyPageVmResponse 로 매핑해서 반환
+     */
+    private List<MyPageVmResponse> findRunningLifecycleVmsForTeam(Long teamId) {
+        if (teamId == null) {
+            return List.of();
+        }
+
+        // lifecycle 이 String 컬럼인 경우:
+
+        List<VmInstance> vms = vmInstanceRepository
+                .findByTeamIdAndLifecycleIgnoreCase(teamId, "RUNNING");
+        // lifecycle 이 enum 인 경우라면 위 대신:
+        // List<VmInstance> vms = vmInstanceRepository
+        //        .findByTeamIdAndLifecycle(teamId, VmLifecycle.RUNNING);
+
+        return vms.stream()
+                .map(this::toVmResponse)
+                .toList();
+    }
+
     // ===== 1) 사원(MEMBER) 마이페이지 =====
 
     /**
-     * 요구사항: 사원은 자기 팀의 VM 정보를 모니터링
-     * → 로그인한 사용자의 teamId 기준으로 VmInstance 리스트 조회
+     * 사원: 자기 팀의 VM 중에서 lifecycle = RUNNING 인 것만 조회
      */
     public MyPageResponse getMyPage(Long userId) {
 
@@ -139,8 +172,8 @@ public class MyPageService {
         if (user.getUserRoles() != null && !user.getUserRoles().isEmpty()) {
             UserRole userRole = user.getUserRoles().get(0);
             if (userRole.getRole() != null) {
-                roleCode = userRole.getRole().getCode();   // 예: "MEMBER"
-                roleName = userRole.getRole().getName();   // 예: "팀원"
+                roleCode = userRole.getRole().getCode();
+                roleName = userRole.getRole().getName();
             }
             if (userRole.getTeam() != null) {
                 teamId = userRole.getTeam().getId();
@@ -148,12 +181,8 @@ public class MyPageService {
             }
         }
 
-        List<MyPageVmResponse> vmList = List.of();
-        if (teamId != null) {
-            vmList = vmInstanceRepository.findByTeamId(teamId).stream()
-                    .map(this::toVmResponse)
-                    .toList();
-        }
+        // ✅ 이 팀의 lifecycle = RUNNING 인 VM만
+        List<MyPageVmResponse> vmList = findRunningLifecycleVmsForTeam(teamId);
 
         return MyPageResponse.builder()
                 .userId(user.getId())
@@ -171,7 +200,7 @@ public class MyPageService {
     // ===== 2) 팀장(LEADER) 마이페이지 =====
 
     /**
-     * 요구사항: 팀장은 "내 팀의 팀원 + 팀원별 VM 목록" 모니터링
+     * 팀장: 내 팀의 팀원 + 각 팀원별로 lifecycle = RUNNING 인 VM 목록
      */
     public TeamLeaderMyPageResponse getTeamLeaderMyPage(Long userId) {
 
@@ -189,12 +218,11 @@ public class MyPageService {
             }
             if (userRole.getTeam() != null) {
                 teamId = userRole.getTeam().getId();
-                teamName = userRole.getTeam().getName(); // 예: "A팀"
+                teamName = userRole.getTeam().getName(); // 예: "develop"
             }
         }
 
         if (teamId == null) {
-            // 팀이 없으면 빈 구조 반환 (FE 안터지게)
             return TeamLeaderMyPageResponse.builder()
                     .leaderName(leader.getUsername())
                     .leaderEmployeeId("TL-" + leader.getEmpno())
@@ -208,13 +236,12 @@ public class MyPageService {
         // 1) 해당 팀 팀원들
         List<User> teamMembers = userRepository.findByUserRoles_Team_Id(teamId);
 
-        // 2) 팀의 전체 VM
-        List<VmInstance> teamVms = vmInstanceRepository.findByTeamId(teamId);
+        // 2) 이 팀의 lifecycle = RUNNING 인 VM 목록
+        List<MyPageVmResponse> runningVms = findRunningLifecycleVmsForTeam(teamId);
 
-        // 3) createdBy(=userId) 별로 VM 그룹핑
-        Map<Long, List<MyPageVmResponse>> vmsByUserId = teamVms.stream()
-                .filter(vm -> vm.getCreatedBy() != null)
-                .map(this::toVmResponse)
+        // 3) ownerId(=userId) 별로 VM 그룹핑
+        Map<Long, List<MyPageVmResponse>> vmsByUserId = runningVms.stream()
+                .filter(vm -> vm.getOwnerId() != null)
                 .collect(Collectors.groupingBy(
                         MyPageVmResponse::getOwnerId,
                         Collectors.toList()
@@ -232,7 +259,7 @@ public class MyPageService {
                 .leaderName(leader.getUsername())
                 .leaderEmployeeId("TL-" + leader.getEmpno())
                 .department("개발본부")
-                .teamName(teamName != null ? teamName : "A팀")
+                .teamName(teamName != null ? teamName : "develop")
                 .roleName(roleName != null ? roleName : "팀장")
                 .members(members)
                 .build();
@@ -241,7 +268,8 @@ public class MyPageService {
     // ===== 3) 부장(HEAD) 마이페이지 =====
 
     /**
-     * 요구사항: 부장은 "여러 팀의 VM 정보"를 모니터링
+     * 부장: 여러 팀의 VM 정보 모니터링
+     * 각 팀/팀원별로 lifecycle = RUNNING 인 VM만 포함
      */
     public HeadMyPageResponse getHeadMyPage(Long userId) {
 
@@ -274,12 +302,11 @@ public class MyPageService {
                             .distinct()
                             .toList();
 
-                    // 팀 VM 목록
-                    List<VmInstance> teamVms = vmInstanceRepository.findByTeamId(teamId);
+                    // ✅ 이 팀의 lifecycle = RUNNING 인 VM 목록
+                    List<MyPageVmResponse> runningVms = findRunningLifecycleVmsForTeam(teamId);
 
-                    Map<Long, List<MyPageVmResponse>> vmsByUserId = teamVms.stream()
-                            .filter(vm -> vm.getCreatedBy() != null)
-                            .map(this::toVmResponse)
+                    Map<Long, List<MyPageVmResponse>> vmsByUserId = runningVms.stream()
+                            .filter(vm -> vm.getOwnerId() != null)
                             .collect(Collectors.groupingBy(
                                     MyPageVmResponse::getOwnerId,
                                     Collectors.toList()
