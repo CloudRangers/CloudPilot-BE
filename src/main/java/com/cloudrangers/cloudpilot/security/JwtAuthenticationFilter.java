@@ -36,15 +36,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String uri = request.getRequestURI();
         log.info(">>> [JWT-FILTER] Processing URI: {}", uri);
 
-        // ⭐ 로그인, 리프레시, 로그아웃 경로는 토큰 검증을 수행하지 않음
-        if (uri.startsWith("/auth/login") || uri.startsWith("/auth/refresh") || uri.startsWith("/auth/logout")) {
+        // 로그인/리프레시/로그아웃은 토큰 검증 스킵
+        if (uri.startsWith("/auth/login") ||
+                uri.startsWith("/auth/refresh") ||
+                uri.startsWith("/auth/logout")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // ⭐ Authorization 헤더 사용 안함 — 쿠키 ONLY
+        // Authorization 헤더 사용 안함 — 쿠키 ONLY
         String token = resolveToken(request);
-
         log.info("🍪 [JWT-FILTER] Extracted Token = {}", token);
 
         if (token == null) {
@@ -52,7 +53,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // ⭐ 블랙리스트 확인
+        // 블랙리스트 확인
         if (redisTemplate.hasKey("BLACKLIST:" + token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("Token is blacklisted");
@@ -66,14 +67,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 Claims claims = jwtProvider.parseClaims(token);
 
-                Long userId = claims.get("userId", Long.class);
-                Long empno = claims.get("empno", Long.class);
+                Long userId   = claims.get("userId", Long.class);
+                Long empno    = claims.get("empno", Long.class);
                 String username = claims.get("username", String.class);
 
                 String roleCode = claims.get("role", String.class);
                 String roleName = claims.get("roleName", String.class);
 
-                Long teamId = claims.get("teamId", Long.class);
+                Long teamId   = claims.get("teamId", Long.class);
                 String teamName = claims.get("teamName", String.class);
 
                 CustomUserDetails principal = new CustomUserDetails(
@@ -123,7 +124,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * ⭐ Authorization 헤더 완전 제거
+     * Authorization 헤더 완전 제거
      * access_token 쿠키 ONLY 사용
      */
     private String resolveToken(HttpServletRequest request) {
@@ -136,7 +137,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         }
-
         return null;
     }
 }

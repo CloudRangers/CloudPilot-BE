@@ -12,6 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
+import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,6 +28,7 @@ public class VmProvisionService {
 
     private final VmInstanceRepository vmInstanceRepository;
     private final ObjectMapper objectMapper;
+    private final MetricTargetRepository metricTargetRepository;   // ✅ 추가
 
     /**
      * 프로비저닝 성공 시, 결과 메시지에 포함된 instance 정보를
@@ -148,9 +152,11 @@ public class VmProvisionService {
             m.put("osType", info.getOsType().trim());
         }
 
-        if (m.isEmpty()) {
-            return null;
+        if (info.getOsType() != null && !info.getOsType().isBlank()) {
+            m.put("osType", info.getOsType().trim());
         }
+
+        if (m.isEmpty()) return null;
 
         try {
             return objectMapper.writeValueAsString(m);

@@ -46,7 +46,7 @@ public class PackageServiceImpl implements PackageService {
             VmInstance vm = vmInstanceRepository.findById(vmId)
                     .orElseThrow(() -> new RuntimeException("VM not found: " + vmId));
 
-            if (!permissionChecker.canInstallPackage(userId, vm.getTeamId(), vm.getOwnerUserId())) {
+            if (!permissionChecker.canInstallPackage(userId, vm.getTeamId(), vm.getCreatedBy())) {
                 throw new RuntimeException("No install permission for VM ID: " + vmId);
             }
 
@@ -92,7 +92,7 @@ public class PackageServiceImpl implements PackageService {
                     .ansRunId(ansRun.getId())
                     .vmId(vm.getId())
                     .hostname(vm.getName())
-                    .ip(vm.getIp())
+                    //.ip(vm.getIp())
                     .requestedAt(now)
                     .requestedByUserId(userDetails.getUserId())
                     .requestedByEmpno(userDetails.getEmpno())
