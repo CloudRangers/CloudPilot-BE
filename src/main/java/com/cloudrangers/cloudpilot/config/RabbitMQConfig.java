@@ -1,5 +1,6 @@
 package com.cloudrangers.cloudpilot.config;
 
+import com.cloudrangers.cloudpilot.dto.message.InstallPackageProgressMessage;
 import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.MapperFeature;
@@ -77,6 +78,11 @@ public class RabbitMQConfig {
         idClassMapping.put(
                 "com.cloudrangers.cloudpilotworker.dto.ProvisionResultMessage",
                 ProvisionResultMessage.class
+        );
+
+        idClassMapping.put(
+                "com.cloudrangers.cloudpilotworker.model.InstallPackageProgressMessage",
+                InstallPackageProgressMessage.class
         );
         classMapper.setIdClassMapping(idClassMapping);
 
@@ -177,13 +183,13 @@ public class RabbitMQConfig {
     // ================================================================
     //           패키지 설치 Job Queue / Exchange / Binding
     // ================================================================
-    @Value("${rabbitmq.queue.package.name:package-install-queue}")
+    @Value("${rabbitmq.queue.package.name:package-install-jobs}")
     private String packageQueueName;
 
     @Value("${rabbitmq.exchange.package.name:package-install-exchange}")
     private String packageExchangeName;
 
-    @Value("${rabbitmq.routing-key.package:package.install}")
+    @Value("${rabbitmq.routing-key.package:package-install.*}")
     private String packageRoutingKey;
 
     @Bean
@@ -218,7 +224,7 @@ public class RabbitMQConfig {
     @Value("${rabbitmq.exchange.package-result.name:package-install-result-exchange}")
     private String packageResultExchangeName;
 
-    @Value("${rabbitmq.routing-key.package-result:package.install.result}")
+    @Value("${rabbitmq.routing-key.package-result:package-install-result.*}")
     private String packageResultRoutingKey;
 
     @Bean
