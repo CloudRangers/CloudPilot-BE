@@ -18,63 +18,65 @@ public class VmInstance {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * (레거시) 프로비저닝 아이템 ID
+     */
     @Column(name = "provision_item_id")
     private Long provisionItemId;
 
-    // 🔥 추가: 이 VM을 만든 Terraform 실행(tf_run)의 ID
+    /**
+     * 이 VM을 만든 Terraform 실행(tf_run)의 ID
+     */
     @Column(name = "tf_run_id")
     private Long tfRunId;
 
-    // 🔥 추가: 해당 실행에서 사용한 terraform state 파일 경로(워커 로컬 경로)
+    /**
+     * Terraform state 파일 경로
+     */
     @Column(name = "state_uri", length = 1024)
     private String stateUri;
 
-    private String name;           // VM 이름
-    private String providerType;   // AWS / VSPHERE
-    private Long zoneId;           // Zone 참조
+    /**
+     * OS 이미지 ID (os_image.id)
+     */
+    @Column(name = "os_image_id")
+    private Long osImageId;
 
-    private String lifecycle;      // creating / running / deleting
-    private String powerState;     // ON / OFF / SUSPENDED
+    /**
+     * CloudPilot 논리 이름
+     */
+    @Column(name = "name", nullable = false)
+    private String name;
 
-    private Integer vcpu;
-    private Integer memoryMb;
-    private Integer rootDiskGb;
+    /**
+     * 클라우드/인프라 제공자 타입
+     */
+    @Column(name = "provider_type", nullable = false)
+    private String providerType;        // 예: "VSPHERE", "AWS"
 
-    private Long ownerUserId;
-    private Long teamId;
+    /**
+     * 실제 인프라에서 쓰는 VM ID (예: vCenter "vm-324")
+     */
+    @Column(name = "provider_instance_id")
+    private String providerInstanceId;
 
-    @Column(name = "created_by", nullable = false, updatable = false)
-    private Long createdBy;
-
-    @Column(name = "updated_by", nullable = false)
-    private Long updatedBy;
-
-    @Column(name = "owner_user_id", nullable = false)
-    private Long ownerUserId;
-
+    /**
+     * Zone 참조
+     */
     @Column(name = "zone_id", nullable = false)
     private Long zoneId;
 
     /**
-     * CloudPilot에서 사용하는 VM 논리 이름
-     * (vCenter VM name이랑 매핑해서 쓸 수 있는 부분)
+     * POWERED_ON / POWERED_OFF 등
      */
-    @Column(name = "name", nullable = false)
-    private String name;                // VM 이름
+    @Column(name = "power_state", nullable = false)
+    private String powerState;
 
     /**
-     * 🔹 클라우드/인프라 제공자 타입
-     *   예) "VSPHERE", "AWS", "GCP" ...
+     * ACTIVE / TERMINATED / PENDING 등
      */
-    @Column(name = "provider_type", nullable = false)
-    private String providerType;        // 예: "AWS", "VSPHERE"
-
-    /**
-     * 🔹 실제 인프라(예: vCenter)에서 쓰는 VM ID
-     *   - vCenter: "vm-324" 이런 값
-     */
-    @Column(name = "provider_instance_id", nullable = false)
-    private String providerInstanceId;  // vSphere vm-XXX, EC2 i-XXXX 등
+    @Column(name = "lifecycle", nullable = false)
+    private String lifecycle;
 
     @Column(name = "vcpu", nullable = false)
     private Integer vcpu;
@@ -86,28 +88,34 @@ public class VmInstance {
     private Integer rootDiskGb;
 
     /**
-     * 예) "POWERED_ON", "POWERED_OFF"
+     * VM 소유자(사용자) ID
      */
-    @Column(name = "power_state", nullable = false)
-    private String powerState;
+    @Column(name = "owner_user_id", nullable = false)
+    private Long ownerUserId;
 
     /**
-     * 예) "ACTIVE", "TERMINATED", "PENDING" 등
+     * VM 소유 팀 ID
      */
-    @Column(name = "lifecycle", nullable = false)
-    private String lifecycle;
+    @Column(name = "team_id")
+    private Long teamId;
 
     /**
-     * 확장용 JSON 컬럼 (태그/메타데이터)
+     * 태그/메타데이터(JSON)
      */
     @Column(name = "tags", columnDefinition = "json")
     private String tags;
 
     /**
-     * Prometheus node-exporter 가 붙는 대표 IP
+     * 대표 IP
      */
     @Column(name = "ip")
     private String ip;
+
+    @Column(name = "created_by", nullable = false, updatable = false)
+    private Long createdBy;
+
+    @Column(name = "updated_by", nullable = false)
+    private Long updatedBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -21,6 +21,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.Comparator;
 
 @Slf4j
@@ -31,25 +33,25 @@ public class AuthController {
 
     private final UserService userService;
     private final JwtProvider jwtProvider;
-
-    // ✅ 네가 AuthMeController에서 사용하던 레포지토리 주입
     private final UserRepository userRepository;
 
-    // 공통 쿠키 생성 함수
-    // Environment-aware cookie creation could be added here (e.g., based on active profile)
-    private ResponseCookie createCookie(String name, String value, long maxAge) {
+    /**
+     * 공통 쿠키 생성 함수
+     */
+    private ResponseCookie createCookie(String name, String value, long maxAgeSeconds) {
         return ResponseCookie.from(name, value)
                 .httpOnly(true)
-                .secure(true) // Enforce HTTPS. For local testing over HTTP, this might need to be false.
-                .sameSite("Lax") // More secure default than "None"
+                .secure(false)         // 🔥 로컬 개발 기준
+                .sameSite("Lax")
                 .path("/")
-                .maxAge(maxAge)
+                .maxAge(maxAgeSeconds)
                 .build();
     }
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@RequestBody LoginRequest request) {
 
+        // 기본 로그인 처리 (유저 정보)
         LoginResponse info = userService.login(request);
 
         String empno = String.valueOf(request.getEmpno());
@@ -58,45 +60,37 @@ public class AuthController {
         String accessToken = jwtProvider.generateAccessToken(empno, claims);
         String refreshToken = jwtProvider.generateRefreshToken(empno);
 
-        long accessTokenMaxAge = jwtProvider.getRemainingExpiration(accessToken) / 1000;
-        ResponseCookie accessCookie = createCookie("access_token", accessToken, accessTokenMaxAge);
+        // access 30분, refresh 14일
+        ResponseCookie accessCookie = createCookie("access_token", accessToken, 60L * 30);
         ResponseCookie refreshCookie = createCookie("refresh_token", refreshToken, 60L * 60 * 24 * 14);
 
-        // ⭐ 로컬 개발환경: SameSite=Lax + secure=false
-        ResponseCookie accessCookie = ResponseCookie.from("access_token", accessToken)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(60 * 30)
-                .build();
-
-        ResponseCookie refreshCookie = ResponseCookie.from("refresh_token", refreshToken)
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(60L * 60 * 24 * 14)
-                .build();
-
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, accessCookie.toString())
-                .header(HttpHeaders.SET_COOKIE, refreshCookie.toString())
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        accessCookie.toString(),
+                        refreshCookie.toString()
+                )
                 .body(ApiResponse.success(info));
-
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<ApiResponse<Void>> refreshToken(HttpServletRequest request) {
 
+        // refresh_token 기반으로 새 토큰들 발급
         TokenRefreshResponse tokens = userService.refresh(request);
 
         long newAccessTokenMaxAge = jwtProvider.getRemainingExpiration(tokens.getAccessToken()) / 1000;
-        ResponseCookie newAccessCookie = createCookie("access_token", tokens.getAccessToken(), newAccessTokenMaxAge);
-        ResponseCookie newRefreshCookie = createCookie("refresh_token", tokens.getRefreshToken(), 60L * 60 * 24 * 14);
+        ResponseCookie newAccessCookie =
+                createCookie("access_token", tokens.getAccessToken(), newAccessTokenMaxAge);
+        ResponseCookie newRefreshCookie =
+                createCookie("refresh_token", tokens.getRefreshToken(), 60L * 60 * 24 * 14);
 
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, newAccessCookie.toString())
+                .header(
+                        HttpHeaders.SET_COOKIE,
+                        newAccessCookie.toString(),
+                        newRefreshCookie.toString()
+                )
                 .body(ApiResponse.success(null));
     }
 
@@ -105,11 +99,12 @@ public class AuthController {
 
         userService.logout(request);
 
+        // 쿠키 삭제
         ResponseCookie clearAccess = createCookie("access_token", "", 0);
         ResponseCookie clearRefresh = createCookie("refresh_token", "", 0);
 
-        response.addHeader("Set-Cookie", clearAccess.toString());
-        response.addHeader("Set-Cookie", clearRefresh.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, clearAccess.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, clearRefresh.toString());
 
         return ApiResponse.success(null);
     }
@@ -117,14 +112,11 @@ public class AuthController {
     /**
      * 로그인한 내 정보 조회
      * GET /auth/me
-     *
-     * - JwtAuthenticationFilter에서 넣어준 Authentication의 name(empno)을 사용
-     * - User + UserRole + Team 정보 조회해서 LoginResponse 구성
      */
     @GetMapping("/me")
-    public ApiResponse<LoginResponse> getMyInfo(HttpServletRequest request) {
+    @Transactional(readOnly = true)  // ⭐ 추가
+    public ApiResponse<LoginResponse> getMyInfo() {
 
-        // 1) SecurityContext 에서 현재 사용자(empno) 꺼내기
         Authentication authentication = SecurityContextHolder
                 .getContext()
                 .getAuthentication();
@@ -133,12 +125,12 @@ public class AuthController {
             throw new RuntimeException("인증 정보가 없습니다. (SecurityContext authentication null)");
         }
 
-        String empnoStr = authentication.getName();   // JwtAuthenticationFilter 에서 세팅한 값 (사번)
-        Long empno = Long.valueOf(empnoStr);
+        // JwtAuthenticationFilter + CustomUserDetails → getName() = username
+        String username = authentication.getName();
+        log.info("[AuthController] /auth/me 요청, username={}", username);
 
-        // 2) DB에서 유저 + 역할 정보 로딩
-        User user = userRepository.findWithRolesByEmpno(empno)
-                .orElseThrow(() -> new UserNotFoundException(empno));
+        User user = userRepository.findWithRolesByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException(username));
 
         UserRole userRole = user.getUserRoles().stream()
                 .max(Comparator.comparingInt(a -> a.getRole().getPermissionLevel()))
@@ -147,7 +139,6 @@ public class AuthController {
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
-        // 3) LoginResponse 형태로 응답 DTO 구성
         LoginResponse dto = LoginResponse.builder()
                 .username(user.getUsername())
                 .roleCode(role.getCode())
@@ -156,7 +147,6 @@ public class AuthController {
                 .teamName(team != null ? team.getName() : "GLOBAL")
                 .build();
 
-        // 4) { success: true, data: {...} } 형태로 반환
         return ApiResponse.success(dto);
     }
 }

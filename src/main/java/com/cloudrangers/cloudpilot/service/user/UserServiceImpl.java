@@ -58,9 +58,8 @@ public class UserServiceImpl implements UserService {
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
+        // ⚠️ 여기서는 토큰을 만들지 않음 (AuthController에서 생성)
         return LoginResponse.builder()
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
                 .username(user.getUsername())
                 .roleCode(role.getCode())
                 .roleName(role.getName())
@@ -70,40 +69,62 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * RefreshToken → AccessToken 재발급
+     * RefreshToken → AccessToken 재발급 (Rotation + 블랙리스트)
      */
     @Override
     public TokenRefreshResponse refresh(HttpServletRequest request) {
 
+        // 1) 쿠키에서 refresh_token 읽기
         String oldRefreshToken = extractRefreshTokenFromCookies(request);
-        if (oldRefreshToken == null) {
+        if (oldRefreshToken == null || oldRefreshToken.isBlank()) {
             throw new InvalidTokenException("refresh_token 쿠키가 없습니다.");
         }
 
+        // 2) 이미 블랙리스트에 있으면 사용 불가
         if (redisTemplate.hasKey("BLACKLIST:" + oldRefreshToken)) {
             throw new InvalidTokenException("만료되었거나 로그아웃된 토큰입니다.");
         }
 
-        if (!jwtProvider.validateToken(oldRefreshToken)) {
-            throw new InvalidTokenException("유효하지 않은 리프레시 토큰입니다.");
+        try {
+            // 3) 유효성 검증
+            if (!jwtProvider.validateToken(oldRefreshToken)) {
+                throw new InvalidTokenException("유효하지 않은 리프레시 토큰입니다.");
+            }
+
+            // 4) 즉시 기존 리프레시 토큰을 블랙리스트에 추가 (Rotation)
+            long exp = jwtProvider.getRemainingExpiration(oldRefreshToken);
+            redisTemplate.opsForValue().set(
+                    "BLACKLIST:" + oldRefreshToken,
+                    "rotated",
+                    exp,
+                    TimeUnit.MILLISECONDS
+            );
+
+            // 5) 새 토큰 생성
+            String empno = jwtProvider.getEmpno(oldRefreshToken);
+            Map<String, Object> claims = buildClaims(empno);
+            String newAccessToken = jwtProvider.generateAccessToken(empno, claims);
+            String newRefreshToken = jwtProvider.generateRefreshToken(empno);
+
+            return TokenRefreshResponse.builder()
+                    .accessToken(newAccessToken)
+                    .refreshToken(newRefreshToken)
+                    .build();
+
+        } catch (JwtExpiredException e) {
+            // 리프레시 토큰이 만료된 경우 → 그대로 재던짐
+            throw e;
+        } catch (JwtInvalidException e) {
+            // JwtProvider 쪽에서 던진 invalid 예외 그대로 전달
+            throw e;
+        } catch (InvalidTokenException e) {
+            // 위에서 던진 커스텀 invalid 예외 그대로 전달
+            throw e;
+        } catch (Exception e) {
+            // 그 외 예외를 InvalidTokenException 으로 래핑
+            log.error("Failed to refresh token", e);
+            throw new InvalidTokenException("토큰 재발급 중 오류가 발생했습니다.");
         }
-        
-        // 1. 즉시 기존 리프레시 토큰을 블랙리스트에 추가 (Rotation)
-        long exp = jwtProvider.getRemainingExpiration(oldRefreshToken);
-        redisTemplate.opsForValue().set(
-                "BLACKLIST:" + oldRefreshToken,
-                "rotated",
-                exp,
-                TimeUnit.MILLISECONDS
-        );
-
-        // 2. 새로운 토큰 생성
-        String empno = jwtProvider.getEmpno(oldRefreshToken);
-        Map<String, Object> claims = buildClaims(empno);
-        String newAccessToken = jwtProvider.generateAccessToken(empno, claims);
-        String newRefreshToken = jwtProvider.generateRefreshToken(empno);
-
-        return new TokenRefreshResponse(newAccessToken, newRefreshToken);
     }
 
     /**
