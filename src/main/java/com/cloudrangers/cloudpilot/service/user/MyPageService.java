@@ -86,26 +86,31 @@ public class MyPageService {
         int memoryGb = memoryMb != null ? memoryMb / 1024 : 0;
         int storageGb = diskGb != null ? diskGb : 0;
 
-        // tags JSON에서 osType / ipAddress 추출
         String osName = extractFieldFromTags(vm.getTags(), "osType");
-        String ip = extractFieldFromTags(vm.getTags(), "ipAddress");
 
-        // ✅ powerState → FE용 status("running"/"stopped"/"pending")로 매핑
-        String powerState = vm.getPowerState(); // 예: "POWERED_ON", "POWERED_OFF"
+        String ip = vm.getIp();
+
+        // ip 컬럼이 비어있을 경우에만 tags 의 ipAddress 보조 사용
+        if (ip == null || ip.isBlank()) {
+            ip = extractFieldFromTags(vm.getTags(), "ipAddress");
+        }
+
+        // powerState → FE status 매핑
+        String powerState = vm.getPowerState();
         String feStatus;
-        if ("POWERED_ON".equalsIgnoreCase(powerState)) {
+        if ("ON".equalsIgnoreCase(powerState)) {
             feStatus = "running";
-        } else if ("POWERED_OFF".equalsIgnoreCase(powerState)) {
+        } else if ("OFF".equalsIgnoreCase(powerState)) {
             feStatus = "stopped";
         } else {
-            feStatus = "pending"; // 생성 중, 에러 등 기타 상태
+            feStatus = "pending";
         }
 
         return MyPageVmResponse.builder()
                 .id(vm.getId())
                 .name(vm.getName())
-                .type(vm.getProviderType())          // 예: "VCENTER"
-                .status(feStatus)                    // 프론트에서 사용하는 status
+                .type(vm.getProviderType())
+                .status(feStatus)
                 .cpu(cpu)
                 .memory(memoryGb)
                 .storage(storageGb)
@@ -113,13 +118,14 @@ public class MyPageService {
                 .ipAddress(ip)
                 .createdAt(createdAt)
                 .lastUpdated(updatedAt)
-                .ownerId(vm.getCreatedBy())          // createdBy = 사용자 ID라고 가정
-                .ownerName(null)                     // TODO: 필요하면 User 조회해서 채우기
+                .ownerId(vm.getCreatedBy())
+                .ownerName(null)
                 .teamId(vm.getTeamId())
-                .teamName(null)                      // 상위에서 이미 teamName을 알고 있으므로 여기선 생략
-                .packages(List.of())                 // 패키지는 아직 없음
+                .teamName(null)
+                .packages(List.of())
                 .build();
     }
+
 
     /** 유저가 특정 roleCode(예: "LEADER")를 갖고 있는지 확인하는 헬퍼 */
     private boolean hasRole(User user, String roleCode) {
