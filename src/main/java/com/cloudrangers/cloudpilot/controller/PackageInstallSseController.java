@@ -13,7 +13,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/sse/package-install")
+@RequestMapping("/sse")
 public class PackageInstallSseController {
 
     private final PackageInstallSseService sseService;
