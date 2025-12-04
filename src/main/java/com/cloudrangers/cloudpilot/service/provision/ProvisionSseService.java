@@ -133,7 +133,7 @@ public class ProvisionSseService {
             String jsonData = objectMapper.writeValueAsString(errorMsg);
 
             emitter.send(SseEmitter.event()
-                    .name("error")
+                    .name("provision-error")
                     .data(jsonData, MediaType.APPLICATION_JSON));
 
             log.error("❌ SSE error sent. jobId={}, error={}", jobId, errorMessage);
