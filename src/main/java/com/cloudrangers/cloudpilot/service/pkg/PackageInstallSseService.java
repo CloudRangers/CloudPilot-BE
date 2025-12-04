@@ -19,9 +19,8 @@ public class PackageInstallSseService {
     private final Map<String, List<InstallPackageProgressMessage>> earlyMessageCache = new ConcurrentHashMap<>();
 
 
-    // 프론트가 SSE 연결할 때 생성
     public SseEmitter createEmitter(String jobId) {
-        SseEmitter emitter = new SseEmitter(0L); // timeout 없음
+        SseEmitter emitter = new SseEmitter(0L);
 
         emitter.onCompletion(() -> {
             log.info("🔌 SSE emitter completed. jobId={}", jobId);
@@ -43,14 +42,12 @@ public class PackageInstallSseService {
         emitterMap.put(jobId, emitter);
         log.info("🔌 SSE emitter created. jobId={}", jobId);
 
-        // 캐시된 메시지가 있으면 즉시 전송
         List<InstallPackageProgressMessage> cachedMessages = earlyMessageCache.get(jobId);
         if (cachedMessages != null) {
             log.info("▶ Found {} cached messages for jobId={}. Sending now.", cachedMessages.size(), jobId);
-            // 순서 보장을 위해 동기적으로 처리
             synchronized (cachedMessages) {
                 for (InstallPackageProgressMessage msg : cachedMessages) {
-                    sendProgress(msg);
+                    sendProgressInternal(emitter, msg);
                 }
             }
             earlyMessageCache.remove(jobId);
@@ -59,27 +56,48 @@ public class PackageInstallSseService {
         return emitter;
     }
 
-    // Worker → RabbitMQ → Listener에서 호출
-    public void sendProgress(InstallPackageProgressMessage msg) {
+    private void sendProgressInternal(SseEmitter emitter, InstallPackageProgressMessage msg) {
         String jobId = msg.getJobId();
-        SseEmitter emitter = emitterMap.get(jobId);
-
-        if (emitter == null) {
-            // Emitter가 없으면 캐시에 저장
-            log.warn("⚠ SSE emitter not found for jobId={}. Caching message.", jobId);
-            earlyMessageCache.computeIfAbsent(jobId, k -> new CopyOnWriteArrayList<>()).add(msg);
-            return;
-        }
 
         try {
+            // 1. Progress 이벤트 전송
             emitter.send(SseEmitter.event()
                     .name("progress")
                     .data(msg));
+
+            // 2. Job 완료 시 Complete 이벤트 전송 및 Emitter 종료
+            // 'int' 타입이므로 null 체크를 제거하고 바로 100과 비교합니다.
+            if (msg.getProgress() == 100) {
+                log.info("🎉 Sending complete event for jobId={}", jobId);
+
+                emitter.send(SseEmitter.event()
+                        .name("complete")
+                        .data(msg));
+
+                emitter.complete();
+            }
+
         } catch (IOException e) {
             log.error("❌ SSE send failed, removing emitter. jobId={}", jobId, e);
             emitterMap.remove(jobId);
             earlyMessageCache.remove(jobId);
         }
+    }
+
+
+    public void sendProgress(InstallPackageProgressMessage msg) {
+        String jobId = msg.getJobId();
+        SseEmitter emitter = emitterMap.get(jobId);
+
+        if (emitter == null) {
+            log.warn("⚠ SSE emitter not found for jobId={}. Caching message.", jobId);
+
+            earlyMessageCache.computeIfAbsent(jobId, k -> new CopyOnWriteArrayList<>()).add(msg);
+
+            return;
+        }
+
+        sendProgressInternal(emitter, msg);
     }
 
     public void sendMessage(String jobId, Object data) {
@@ -99,5 +117,4 @@ public class PackageInstallSseService {
             emitterMap.remove(jobId);
         }
     }
-
 }
