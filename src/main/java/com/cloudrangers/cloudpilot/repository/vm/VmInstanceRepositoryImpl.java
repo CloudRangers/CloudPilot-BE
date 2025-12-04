@@ -1,3 +1,4 @@
+// src/main/java/com/cloudrangers/cloudpilot/repository/vm/VmInstanceRepositoryImpl.java
 package com.cloudrangers.cloudpilot.repository.vm;
 
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
@@ -5,7 +6,6 @@ import com.cloudrangers.cloudpilot.dto.request.VmSearchCondition;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.TypedQuery;
-import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -39,11 +39,17 @@ public class VmInstanceRepositoryImpl implements VmInstanceRepositoryCustom {
             countJpql.append(" and v.zoneId = :zoneId");
             params.put("zoneId", c.getZoneId());
         }
-        if (StringUtils.hasText(c.getStatus())) { // lifecycle 매핑
-            jpql.append(" and v.lifecycle = :lifecycle");
-            countJpql.append(" and v.lifecycle = :lifecycle");
-            params.put("lifecycle", c.getStatus());
-        }
+
+        // ✅ lifecycle 필터
+        // - status 파라미터가 있으면 그 값을 lifecycle 로 사용
+        // - 없으면 기본값 "running" 으로 lifecycle 고정
+        String lifecycle = StringUtils.hasText(c.getStatus())
+                ? c.getStatus()
+                : "running";
+        jpql.append(" and v.lifecycle = :lifecycle");
+        countJpql.append(" and v.lifecycle = :lifecycle");
+        params.put("lifecycle", lifecycle);
+
         if (StringUtils.hasText(c.getPowerState())) {
             jpql.append(" and v.powerState = :powerState");
             countJpql.append(" and v.powerState = :powerState");
@@ -64,6 +70,7 @@ public class VmInstanceRepositoryImpl implements VmInstanceRepositoryCustom {
             countJpql.append(" and v.teamId = :teamId");
             params.put("teamId", c.getTeamId());
         }
+
         Instant from = c.getCreatedFrom();
         Instant to   = c.getCreatedTo();
         if (from != null) {
@@ -87,6 +94,7 @@ public class VmInstanceRepositoryImpl implements VmInstanceRepositoryCustom {
         // ---- 쿼리 실행 ----
         TypedQuery<VmInstance> dataQuery = em.createQuery(jpql.toString(), VmInstance.class);
         TypedQuery<Long> countQuery = em.createQuery(countJpql.toString(), Long.class);
+
         params.forEach((k, v) -> {
             dataQuery.setParameter(k, v);
             countQuery.setParameter(k, v);
