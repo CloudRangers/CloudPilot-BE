@@ -3,6 +3,8 @@ package com.cloudrangers.cloudpilot.monitor.prometheus.controller;
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
 import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusMetricsService;
+import com.cloudrangers.cloudpilot.monitor.prometheus.dto.HostResourceChartResponse;
+import com.cloudrangers.cloudpilot.monitor.prometheus.service.HostResourceMetricsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +19,7 @@ import java.util.Map;
 public class PrometheusController {
 
     private final PrometheusMetricsService prometheusMetricsService;
+    private final HostResourceMetricsService hostResourceMetricsService;
 
     /**
      * 지정한 VM 이름 목록에 대한 메트릭 요약 조회
@@ -37,5 +40,26 @@ public class PrometheusController {
                 prometheusMetricsService.getMetricsForVmNames(vmNames, teamId);
 
         return ApiResponse.success(metrics);
+    }
+
+    /**
+     * vSphere 호스트 CPU/메모리 사용률 시계열 (Recharts용)
+     *
+     * 예:
+     *  GET /monitor/prometheus/hosts/172.16.0.30/resources?rangeMinutes=60&stepSeconds=60
+     */
+    @GetMapping("/hosts/{hostName:.+}/resources")
+    public ApiResponse<HostResourceChartResponse> getHostResourceSeries(
+            @PathVariable("hostName") String hostName,
+            @RequestParam(value = "rangeMinutes", required = false) Integer rangeMinutes,
+            @RequestParam(value = "stepSeconds", required = false) Integer stepSeconds
+    ) {
+        log.info("[PrometheusController] host resource series. hostName={}, rangeMinutes={}, stepSeconds={}",
+                hostName, rangeMinutes, stepSeconds);
+
+        HostResourceChartResponse data =
+                hostResourceMetricsService.getHostResourceSeries(hostName, rangeMinutes, stepSeconds);
+
+        return ApiResponse.success(data);
     }
 }
