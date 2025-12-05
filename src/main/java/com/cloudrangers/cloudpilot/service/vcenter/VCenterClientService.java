@@ -17,6 +17,35 @@ public class VCenterClientService {
 
     private final VCenterClient vCenterClient;
 
+    /**
+     * power_state 문자열 정규화
+     * - null   → ""
+     * - 양쪽 공백 제거
+     * - 대문자 변환
+     * - "_", "-", " " 제거해서 형식 차이 흡수
+     *
+     * 예)
+     *   "POWERED_ON"   → "POWEREDON"
+     *   "poweredOn"    → "POWEREDON"
+     *   " powered-off" → "POWEREDOFF"
+     */
+    private String normPowerState(Object state) {
+        if (state == null) return "";
+        String s = String.valueOf(state).trim().toUpperCase();
+        return s.replace("_", "")
+                .replace("-", "")
+                .replace(" ", "");
+    }
+
+    /**
+     * connection_state 정규화 (host용)
+     * - 대소문자/공백 정도만 정리
+     */
+    private String normConnectionState(Object state) {
+        if (state == null) return "";
+        return String.valueOf(state).trim().toUpperCase();
+    }
+
     public VCenterSummaryResponse getSummary() {
         // 1) VM 목록 가져오기
         List<Map<String, Object>> vms = Collections.emptyList();
@@ -27,11 +56,15 @@ public class VCenterClientService {
         }
 
         int totalVms = vms.size();
+
         long poweredOnVms = vms.stream()
-                .filter(vm -> "POWERED_ON".equalsIgnoreCase(String.valueOf(vm.get("power_state"))))
+                .map(vm -> normPowerState(vm.get("power_state")))
+                .filter(s -> s.equals("POWEREDON"))
                 .count();
+
         long poweredOffVms = vms.stream()
-                .filter(vm -> "POWERED_OFF".equalsIgnoreCase(String.valueOf(vm.get("power_state"))))
+                .map(vm -> normPowerState(vm.get("power_state")))
+                .filter(s -> s.equals("POWEREDOFF"))
                 .count();
 
         // 2) Host 목록 가져오기 (실패해도 치명적 X)
@@ -45,15 +78,22 @@ public class VCenterClientService {
 
         int totalHosts = hosts.size();
         long connectedHosts = hosts.stream()
-                .filter(h -> "CONNECTED".equalsIgnoreCase(String.valueOf(h.get("connection_state"))))
+                .map(h -> normConnectionState(h.get("connection_state")))
+                .filter(s -> s.equals("CONNECTED"))
                 .count();
+
         long disconnectedHosts = hosts.stream()
-                .filter(h -> "DISCONNECTED".equalsIgnoreCase(String.valueOf(h.get("connection_state"))))
+                .map(h -> normConnectionState(h.get("connection_state")))
+                .filter(s -> s.equals("DISCONNECTED"))
                 .count();
 
         return new VCenterSummaryResponse(
-                totalVms, poweredOnVms, poweredOffVms,
-                totalHosts, connectedHosts, disconnectedHosts
+                totalVms,
+                poweredOnVms,
+                poweredOffVms,
+                totalHosts,
+                connectedHosts,
+                disconnectedHosts
         );
     }
 }

@@ -33,4 +33,5 @@ public class MyPageVmResponse {
 
     private List<String> packages;
 
+    private List<AssignedMemberResponse> assignedMembers;
 }

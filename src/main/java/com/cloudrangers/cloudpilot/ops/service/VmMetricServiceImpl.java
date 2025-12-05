@@ -27,11 +27,11 @@ public class VmMetricServiceImpl implements VmMetricService {
     /**
      * vmId → Prometheus instance 문자열로 변환
      * - "172.16.5.117:9100" 형태면 그대로 사용
-     * - 숫자면 DB 조회 후 endpoint(=instance) 반환
+     * - 숫자면 DB 조회 후 endpoint(=instance 라벨 값) 반환
      */
     private String resolveInstance(String vmId) {
-        // Case 1: FE에서 이미 instance 형태로 전달 (예: "172.16.5.110:9100")
-        if (vmId.contains(":")) {
+        // Case 1: FE에서 이미 instance 형태로 전달 (예: "172.16.5.110:9100" or "nexus-node")
+        if (vmId.contains(":") || !vmId.chars().allMatch(Character::isDigit)) {
             return vmId;
         }
 
@@ -51,7 +51,8 @@ public class VmMetricServiceImpl implements VmMetricService {
                 .orElseThrow(() ->
                         new IllegalArgumentException("MetricTarget not found for vmId=" + vmId));
 
-        return target.getEndpoint();  // e.g., "172.16.5.112:9100"
+        // endpoint 필드에 Prometheus instance 라벨 값이 들어있다고 가정
+        return target.getEndpoint();  // e.g., "172.16.5.112:9100" 또는 "nexus-node"
     }
 
     @Override
@@ -61,13 +62,12 @@ public class VmMetricServiceImpl implements VmMetricService {
         log.info("[VmMetricService] called. vmId={}, metricName={}, rangeMinutes={}, stepSeconds={}",
                 vmId, metricName, rangeMinutes, stepSeconds);
 
-        // 🔹 vmId 형태(IP:PORT or 숫자)에 상관없이 instance 문자열로 통일
+        // vmId 형태(IP:PORT or 숫자 or 이름)에 상관없이 instance 문자열로 통일
         String instance = resolveInstance(vmId);
 
         // PromQL 생성
         String promQl = buildPromQl(metricName, instance);
 
-        // 🔹 실제 PromQL 로그
         log.info("[VmMetricService] vmId={}, metricName={}, promQl={}", vmId, metricName, promQl);
 
         // 시간 범위
@@ -128,12 +128,14 @@ public class VmMetricServiceImpl implements VmMetricService {
         return new RechartsDataResponse(vmId, metricName, chartPoints);
     }
 
+    /**
+     * PromQL 생성
+     *  - job 라벨 필터 제거 (instance 만 맞추도록)
+     */
     private String buildPromQl(String metricName, String instance) {
 
-        String selector = String.format(
-                "instance=\"%s\",job=\"node-exporter\"",
-                instance
-        );
+        // 🔹 job 필터 제거, instance 만 사용
+        String selector = String.format("instance=\"%s\"", instance);
 
         switch (metricName) {
             case "vm_cpu_usage_percent":
@@ -144,11 +146,13 @@ public class VmMetricServiceImpl implements VmMetricService {
 
             case "vm_memory_usage_percent":
                 return String.format(
-                        "(1 - (node_memory_MemAvailable_bytes{%1$s} / node_memory_MemTotal_bytes{%1$s})) * 100",
+                        "(1 - (node_memory_MemAvailable_bytes{%1$s} / " +
+                                "      node_memory_MemTotal_bytes{%1$s})) * 100",
                         selector
                 );
 
             default:
+                // 기타 메트릭은 selector 만 붙여서 그대로 사용
                 return String.format("%s{%s}", metricName, selector);
         }
     }

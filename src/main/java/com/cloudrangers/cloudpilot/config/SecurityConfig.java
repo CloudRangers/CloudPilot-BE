@@ -50,6 +50,10 @@ public class SecurityConfig {
                                 "/users/me/all-team"
                         ).permitAll()
 
+                        // 🔥 Actuator Prometheus/health/info 오픈 (추가)
+                        .requestMatchers("/actuator/prometheus", "/actuator/health", "/actuator/info").permitAll()
+
+                        // 내 정보는 인증 필요
                         .requestMatchers("/auth/me").authenticated()
 
                         // 관리자/헤드 권한 필요한 애들
@@ -74,7 +78,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
 
-        // JWT 필터
+                // JWT 필터
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 
                 // CORS

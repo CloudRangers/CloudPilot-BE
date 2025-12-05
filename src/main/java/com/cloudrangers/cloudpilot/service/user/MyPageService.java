@@ -1,10 +1,11 @@
 // src/main/java/com/cloudrangers/cloudpilot/service/user/MyPageService.java
 package com.cloudrangers.cloudpilot.service.user;
 
+import com.cloudrangers.cloudpilot.domain.user.Role;
 import com.cloudrangers.cloudpilot.domain.user.User;
 import com.cloudrangers.cloudpilot.domain.user.UserRole;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
-// import com.cloudrangers.cloudpilot.domain.vm.VmLifecycle; // enum 사용 시
+import com.cloudrangers.cloudpilot.dto.user.AssignedMemberResponse;
 import com.cloudrangers.cloudpilot.dto.user.HeadMyPageResponse;
 import com.cloudrangers.cloudpilot.dto.user.HeadTeamMemberResponse;
 import com.cloudrangers.cloudpilot.dto.user.HeadTeamResponse;
@@ -57,6 +58,60 @@ public class MyPageService {
     }
 
     /**
+     * 이 VM의 담당 팀원(팀장/팀원) 정보 계산
+     * - VM.createdBy(=ownerId) + VM.teamId 기준
+     * - 해당 팀에서 LEADER / MEMBER 역할만 인정
+     * - 없으면 "미할당" → 빈 리스트 반환
+     */
+    private List<AssignedMemberResponse> resolveAssignedMembers(VmInstance vm) {
+
+        Long ownerId = vm.getCreatedBy();
+        Long teamId = vm.getTeamId();
+
+        if (ownerId == null || teamId == null) {
+            return List.of();
+        }
+
+        // owner + roles 로딩
+        User owner = userRepository.findWithRolesById(ownerId).orElse(null);
+        if (owner == null || owner.getUserRoles() == null) {
+            return List.of();
+        }
+
+        // 이 팀(teamId)에서의 역할들 중 LEADER / MEMBER 만 필터
+        Optional<Role> maybeRole = owner.getUserRoles().stream()
+                .filter(ur -> ur.getTeam() != null &&
+                        Objects.equals(ur.getTeam().getId(), teamId))
+                .map(UserRole::getRole)
+                .filter(Objects::nonNull)
+                .filter(r ->
+                        "LEADER".equalsIgnoreCase(r.getCode()) ||
+                                "MEMBER".equalsIgnoreCase(r.getCode())
+                )
+                // 둘 다 있을 가능성 대비: permissionLevel 제일 높은 것 선택
+                .max(Comparator.comparingInt(Role::getPermissionLevel));
+
+        if (maybeRole.isEmpty()) {
+            // 🔸 여기서 걸리면 → 이 VM의 owner는 ADMIN/HEAD 이거나,
+            //   해당 팀의 LEADER/MEMBER가 아니라는 뜻 → "미할당" 취급
+            return List.of();
+        }
+
+        Role role = maybeRole.get();
+
+        AssignedMemberResponse dto = AssignedMemberResponse.builder()
+                .userId(owner.getId())
+                .username(owner.getUsername())
+                .employeeId("EMP-" + owner.getEmpno())
+                .roleCode(role.getCode())
+                .roleName(role.getName())
+                .build();
+
+        // 지금은 담당자 1명 구조로 설계
+        return List.of(dto);
+    }
+
+    /**
      * VmInstance → 마이페이지용 VM DTO 매핑
      *
      * VmInstance 필드 구조:
@@ -78,6 +133,7 @@ public class MyPageService {
             updatedAt = LocalDateTime.ofInstant(vm.getUpdatedAt(), ZoneId.systemDefault());
         }
 
+        // ✅ CPU / 메모리 / 디스크 실제 값 사용
         Integer vcpu = vm.getVcpu();
         Integer memoryMb = vm.getMemoryMb();
         Integer diskGb = vm.getRootDiskGb();
@@ -86,6 +142,7 @@ public class MyPageService {
         int memoryGb = memoryMb != null ? memoryMb / 1024 : 0;
         int storageGb = diskGb != null ? diskGb : 0;
 
+        // ✅ tags JSON에서 osType / ipAddress 등 추출 (없으면 null)
         String osName = extractFieldFromTags(vm.getTags(), "osType");
 
         String ip = vm.getIp();
@@ -106,6 +163,9 @@ public class MyPageService {
             feStatus = "pending";
         }
 
+        // 🔹 여기서 담당 팀원 정보 계산
+        List<AssignedMemberResponse> assignedMembers = resolveAssignedMembers(vm);
+
         return MyPageVmResponse.builder()
                 .id(vm.getId())
                 .name(vm.getName())
@@ -121,8 +181,9 @@ public class MyPageService {
                 .ownerId(vm.getCreatedBy())
                 .ownerName(null)
                 .teamId(vm.getTeamId())
-                .teamName(null)
-                .packages(List.of())
+                .teamName(null)                      // 상위에서 이미 teamName을 알고 있으므로 여기선 생략
+                .packages(List.of())                 // 패키지는 아직 없음
+                .assignedMembers(assignedMembers)    // 🔹 새 필드
                 .build();
     }
 
@@ -163,7 +224,8 @@ public class MyPageService {
     // ===== 1) 사원(MEMBER) 마이페이지 =====
 
     /**
-     * 사원: 자기 팀의 VM 중에서 lifecycle = RUNNING 인 것만 조회
+     * 요구사항: 사원은 자기 팀의 VM 정보를 모니터링
+     * → 로그인한 사용자의 teamId 기준으로 VmInstance 리스트 조회
      */
     public MyPageResponse getMyPage(Long userId) {
 
@@ -178,8 +240,8 @@ public class MyPageService {
         if (user.getUserRoles() != null && !user.getUserRoles().isEmpty()) {
             UserRole userRole = user.getUserRoles().get(0);
             if (userRole.getRole() != null) {
-                roleCode = userRole.getRole().getCode();
-                roleName = userRole.getRole().getName();
+                roleCode = userRole.getRole().getCode();   // 예: "MEMBER"
+                roleName = userRole.getRole().getName();   // 예: "팀원"
             }
             if (userRole.getTeam() != null) {
                 teamId = userRole.getTeam().getId();
@@ -187,8 +249,12 @@ public class MyPageService {
             }
         }
 
-        // ✅ 이 팀의 lifecycle = RUNNING 인 VM만
-        List<MyPageVmResponse> vmList = findRunningLifecycleVmsForTeam(teamId);
+        List<MyPageVmResponse> vmList = List.of();
+        if (teamId != null) {
+            vmList = vmInstanceRepository.findByTeamId(teamId).stream()
+                    .map(this::toVmResponse)
+                    .toList();
+        }
 
         return MyPageResponse.builder()
                 .userId(user.getId())
@@ -224,11 +290,12 @@ public class MyPageService {
             }
             if (userRole.getTeam() != null) {
                 teamId = userRole.getTeam().getId();
-                teamName = userRole.getTeam().getName(); // 예: "develop"
+                teamName = userRole.getTeam().getName(); // 예: "A팀"
             }
         }
 
         if (teamId == null) {
+            // 팀이 없으면 빈 구조 반환 (FE 안터지게)
             return TeamLeaderMyPageResponse.builder()
                     .leaderName(leader.getUsername())
                     .leaderEmployeeId("TL-" + leader.getEmpno())
@@ -239,15 +306,18 @@ public class MyPageService {
                     .build();
         }
 
-        // 1) 해당 팀 팀원들
-        List<User> teamMembers = userRepository.findByUserRoles_Team_Id(teamId);
+        // 1) 해당 팀 팀원들 (ADMIN/HEAD 제외, LEADER/MEMBER만)
+        List<User> teamMembers = userRepository.findByUserRoles_Team_Id(teamId).stream()
+                .filter(u -> hasRole(u, "LEADER") || hasRole(u, "MEMBER"))
+                .toList();
 
-        // 2) 이 팀의 lifecycle = RUNNING 인 VM 목록
-        List<MyPageVmResponse> runningVms = findRunningLifecycleVmsForTeam(teamId);
+        // 2) 팀의 전체 VM
+        List<VmInstance> teamVms = vmInstanceRepository.findByTeamId(teamId);
 
-        // 3) ownerId(=userId) 별로 VM 그룹핑
-        Map<Long, List<MyPageVmResponse>> vmsByUserId = runningVms.stream()
-                .filter(vm -> vm.getOwnerId() != null)
+        // 3) createdBy(=userId) 별로 VM 그룹핑
+        Map<Long, List<MyPageVmResponse>> vmsByUserId = teamVms.stream()
+                .filter(vm -> vm.getCreatedBy() != null)
+                .map(this::toVmResponse)
                 .collect(Collectors.groupingBy(
                         MyPageVmResponse::getOwnerId,
                         Collectors.toList()
@@ -265,7 +335,7 @@ public class MyPageService {
                 .leaderName(leader.getUsername())
                 .leaderEmployeeId("TL-" + leader.getEmpno())
                 .department("개발본부")
-                .teamName(teamName != null ? teamName : "develop")
+                .teamName(teamName != null ? teamName : "A팀")
                 .roleName(roleName != null ? roleName : "팀장")
                 .members(members)
                 .build();
@@ -274,8 +344,7 @@ public class MyPageService {
     // ===== 3) 부장(HEAD) 마이페이지 =====
 
     /**
-     * 부장: 여러 팀의 VM 정보 모니터링
-     * 각 팀/팀원별로 lifecycle = RUNNING 인 VM만 포함
+     * 요구사항: 부장은 "여러 팀의 VM 정보"를 모니터링
      */
     public HeadMyPageResponse getHeadMyPage(Long userId) {
 
@@ -306,13 +375,15 @@ public class MyPageService {
                             .map(UserRole::getUser)
                             .filter(Objects::nonNull)
                             .distinct()
+                            .filter(u -> hasRole(u, "LEADER") || hasRole(u, "MEMBER"))
                             .toList();
 
-                    // ✅ 이 팀의 lifecycle = RUNNING 인 VM 목록
-                    List<MyPageVmResponse> runningVms = findRunningLifecycleVmsForTeam(teamId);
+                    // 팀 VM 목록
+                    List<VmInstance> teamVms = vmInstanceRepository.findByTeamId(teamId);
 
-                    Map<Long, List<MyPageVmResponse>> vmsByUserId = runningVms.stream()
-                            .filter(vm -> vm.getOwnerId() != null)
+                    Map<Long, List<MyPageVmResponse>> vmsByUserId = teamVms.stream()
+                            .filter(vm -> vm.getCreatedBy() != null)
+                            .map(this::toVmResponse)
                             .collect(Collectors.groupingBy(
                                     MyPageVmResponse::getOwnerId,
                                     Collectors.toList()

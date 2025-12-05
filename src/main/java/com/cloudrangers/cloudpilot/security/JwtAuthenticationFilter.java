@@ -36,6 +36,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String uri = request.getRequestURI();
         log.info(">>> [JWT-FILTER] Processing URI: {}", uri);
 
+        // 🔥 1) Actuator는 JWT 검사 스킵 (추가)
+        if (uri.startsWith("/actuator")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // 로그인/리프레시/로그아웃은 토큰 검증 스킵
         if (uri.startsWith("/auth/login") ||
                 uri.startsWith("/auth/refresh") ||

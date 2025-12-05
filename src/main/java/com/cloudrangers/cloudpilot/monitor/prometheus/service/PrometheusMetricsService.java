@@ -1,5 +1,7 @@
+// src/main/java/com/cloudrangers/cloudpilot/monitor/prometheus/service/PrometheusMetricsService.java
 package com.cloudrangers.cloudpilot.monitor.prometheus.service;
 
+import com.cloudrangers.cloudpilot.monitor.prometheus.dto.DatastoreUsageDto;
 import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
 import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
 import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
@@ -129,9 +131,72 @@ public class PrometheusMetricsService {
         return result;
     }
 
+    /**
+     * 🔹 Datastore 용량/사용률 조회
+     *
+     * vmware_datastore_capacity_size / vmware_datastore_freespace_size 를 사용
+     */
+    public Map<String, DatastoreUsageDto> getDatastoreUsage(List<String> dsNames) {
+        Map<String, DatastoreUsageDto> result = new HashMap<>();
+
+        if (dsNames == null || dsNames.isEmpty()) {
+            log.info("[PrometheusMetrics] dsNames empty. return default.");
+            return result;
+        }
+
+        try {
+            // capacity / free 각각 한 번씩 조회 (ds_name label로 필터링)
+            String joined = String.join("|", dsNames); // HDD1 (1)|NVME (1)
+            String capacityQuery = String.format(
+                    "vmware_datastore_capacity_size{job=\"vmware_vcenter\", ds_name=~\"%s\"}",
+                    joined
+            );
+            String freeQuery = String.format(
+                    "vmware_datastore_freespace_size{job=\"vmware_vcenter\", ds_name=~\"%s\"}",
+                    joined
+            );
+
+            log.info("[PrometheusMetrics] datastore capacityQuery={}", capacityQuery);
+            log.info("[PrometheusMetrics] datastore freeQuery={}", freeQuery);
+
+            String capJson = prometheusClient.query(capacityQuery);
+            String freeJson = prometheusClient.query(freeQuery);
+
+            Map<String, Double> capacityMap = parseDatastoreValueMap(capJson);
+            Map<String, Double> freeMap = parseDatastoreValueMap(freeJson);
+
+            for (String name : dsNames) {
+                Double cap = capacityMap.get(name);
+                Double free = freeMap.get(name);
+
+                if (cap == null || free == null) {
+                    log.info("[PrometheusMetrics] datastore {} 값 없음 (cap={}, free={})", name, cap, free);
+                    continue;
+                }
+
+                double used = cap - free;
+                double usedPercent = (cap > 0) ? (used * 100.0 / cap) : 0.0;
+
+                DatastoreUsageDto dto = DatastoreUsageDto.builder()
+                        .dsName(name)
+                        .capacityBytes(cap)
+                        .freeBytes(free)
+                        .usedBytes(used)
+                        .usedPercent(usedPercent)
+                        .build();
+
+                result.put(name, dto);
+            }
+
+        } catch (Exception e) {
+            log.error("[PrometheusMetrics] datastore usage 조회 중 예외", e);
+        }
+
+        return result;
+    }
 
     /**
-     * Prometheus 응답 파싱
+     * Prometheus 응답 파싱 (vector)
      */
     private Map<String, Double> parseVector(String json) throws IOException {
         Map<String, Double> map = new HashMap<>();
@@ -155,6 +220,44 @@ public class PrometheusMetricsService {
             map.put(instance, value);
         }
 
+        return map;
+    }
+
+    /**
+     * vmware_datastore_* 메트릭 instant query 결과를
+     * ds_name -> value 맵으로 파싱
+     */
+    private Map<String, Double> parseDatastoreValueMap(String json) {
+        Map<String, Double> map = new HashMap<>();
+        if (json == null) {
+            return map;
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            if (!"success".equals(root.path("status").asText())) {
+                log.warn("[Prometheus] datastore 응답 status != success: {}", json);
+                return map;
+            }
+
+            JsonNode results = root.path("data").path("result");
+            if (!results.isArray()) {
+                return map;
+            }
+
+            for (JsonNode series : results) {
+                String dsName = series.path("metric").path("ds_name").asText(null);
+                JsonNode valueNode = series.path("value");
+                if (dsName == null || !valueNode.isArray() || valueNode.size() < 2) {
+                    continue;
+                }
+                double v = valueNode.get(1).asDouble();
+                map.put(dsName, v);
+            }
+
+        } catch (Exception e) {
+            log.error("[Prometheus] datastore value 파싱 실패", e);
+        }
         return map;
     }
 
