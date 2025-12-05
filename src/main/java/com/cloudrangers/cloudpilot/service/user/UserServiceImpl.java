@@ -1,5 +1,6 @@
 package com.cloudrangers.cloudpilot.service.user;
 
+import com.cloudrangers.cloudpilot.domain.user.LoginHistory;
 import com.cloudrangers.cloudpilot.domain.user.User;
 import com.cloudrangers.cloudpilot.domain.user.UserRole;
 import com.cloudrangers.cloudpilot.dto.request.LoginRequest;
@@ -10,8 +11,11 @@ import com.cloudrangers.cloudpilot.exception.badrequest.InvalidTokenException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtExpiredException;
 import com.cloudrangers.cloudpilot.exception.jwt.JwtInvalidException;
 import com.cloudrangers.cloudpilot.exception.notfound.UserNotFoundException;
+import com.cloudrangers.cloudpilot.repository.user.LoginHistoryRepository;
 import com.cloudrangers.cloudpilot.repository.user.UserRepository;
 import com.cloudrangers.cloudpilot.security.JwtProvider;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -20,9 +24,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -36,10 +38,13 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
 
+    // ⭐ 로그인 히스토리 저장용
+    private final LoginHistoryRepository loginHistoryRepository;
+
     /**
      * 로그인 처리
      * ✔ 토큰 생성은 Controller에서 진행
-     * ✔ 여기서는 유저 정보만 반환
+     * ✔ 여기서는 유저 정보 + 로그인 히스토리 기록만 담당
      */
     @Override
     public LoginResponse login(@NonNull LoginRequest request) {
@@ -58,7 +63,17 @@ public class UserServiceImpl implements UserService {
         var role = userRole.getRole();
         var team = userRole.getTeam();
 
-        // ⚠️ 여기서는 토큰을 만들지 않음 (AuthController에서 생성)
+        // 4) 🔥 로그인 히스토리 저장 (ADMIN 포함 전체 기록)
+        //    AdminOverviewService 에서는 HEAD/LEADER/MEMBER 만 집계
+        loginHistoryRepository.save(
+                LoginHistory.builder()
+                        .userId(user.getId())
+                        .userRole(role.getCode())      // 예: ADMIN / HEAD / LEADER / MEMBER
+                        .loginAt(LocalDateTime.now())
+                        .build()
+        );
+
+        // 5) 여기서는 토큰을 만들지 않음 (AuthController에서 생성)
         return LoginResponse.builder()
                 .username(user.getUsername())
                 .roleCode(role.getCode())
@@ -112,16 +127,12 @@ public class UserServiceImpl implements UserService {
                     .build();
 
         } catch (JwtExpiredException e) {
-            // 리프레시 토큰이 만료된 경우 → 그대로 재던짐
             throw e;
         } catch (JwtInvalidException e) {
-            // JwtProvider 쪽에서 던진 invalid 예외 그대로 전달
             throw e;
         } catch (InvalidTokenException e) {
-            // 위에서 던진 커스텀 invalid 예외 그대로 전달
             throw e;
         } catch (Exception e) {
-            // 그 외 예외를 InvalidTokenException 으로 래핑
             log.error("Failed to refresh token", e);
             throw new InvalidTokenException("토큰 재발급 중 오류가 발생했습니다.");
         }
@@ -176,7 +187,6 @@ public class UserServiceImpl implements UserService {
 
         log.info("로그아웃 완료 → Access & Refresh 블랙리스트 처리됨");
     }
-
 
     @Override
     public void sendPasswordResetEmail(String email) {
@@ -260,7 +270,6 @@ public class UserServiceImpl implements UserService {
         return claims;
     }
 
-
     /**
      * 가장 권한 높은 UserRole 반환
      */
@@ -269,7 +278,6 @@ public class UserServiceImpl implements UserService {
                 .max(Comparator.comparingInt(a -> a.getRole().getPermissionLevel()))
                 .orElseThrow(() -> new RuntimeException("역할 정보가 없습니다."));
     }
-
 
     /** ACCESS TOKEN 읽기 */
     private String extractAccessTokenFromCookies(HttpServletRequest request) {
@@ -292,7 +300,6 @@ public class UserServiceImpl implements UserService {
         }
         return null;
     }
-
 
     /**
      * 내 정보 조회 (AccessToken 기반)

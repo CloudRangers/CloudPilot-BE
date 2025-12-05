@@ -22,4 +22,10 @@ public interface VmInstanceRepository
     List<VmInstance> findByTeamId(Long teamId);
 
     List<VmInstance> findByTeamIdAndLifecycleIgnoreCase(Long teamId, String running);
+
+    // ✅ VM 이름 + lifecycle 기준 존재 여부 (팀 상관 없음)
+    boolean existsByNameAndLifecycle(String name, String lifecycle);
+
+    // ✅ VM 이름 + 팀 + lifecycle 기준 존재 여부
+    boolean existsByNameAndTeamIdAndLifecycle(String name, Long teamId, String lifecycle);
 }

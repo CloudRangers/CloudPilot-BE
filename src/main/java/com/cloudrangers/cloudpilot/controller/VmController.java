@@ -133,11 +133,30 @@ public class VmController {
     }
 
     /**
-     * ⭐ VM 삭제 상태 조회
+     * ⭐ VM 이름 중복 체크
+     * - lifecycle = "running" 인 VM 기준
+     * - teamId 가 넘어오면 팀 내에서만 체크, 없으면 전체에서 체크
+     */
+    @GetMapping("/name-check")
+    @Operation(
+            summary = "VM 이름 중복 체크",
+            description = "현재 실행 중(running)인 VM 들을 기준으로 이름 중복 여부를 확인합니다."
+    )
+    public ApiResponse<Map<String, Boolean>> checkVmName(
+            @RequestParam("name") String name,
+            @RequestParam(value = "teamId", required = false) Long teamId
+    ) {
+        boolean duplicate = vmQueryService.isVmNameDuplicate(name, teamId);
+
+        Map<String, Boolean> body = new HashMap<>();
+        body.put("duplicate", duplicate);
+
+        return ApiResponse.success(body);
+    }
+
+    /**
+     * ⭐ VM 삭제 상태 조회 (레거시 주석)
      * - lifecycle 필드를 통해 삭제 진행 상태 확인
-     *
-     * @param vmId VM ID
-     * @return VM lifecycle 상태 (deleting, deleted, running 등)
      */
 //    @GetMapping("/{vmId}/deletion-status")
 //    @Operation(

@@ -1,19 +1,17 @@
 package com.cloudrangers.cloudpilot.service.provision;
 
 import com.cloudrangers.cloudpilot.dto.message.ProvisionProgressMessage;
+import com.cloudrangers.cloudpilot.dto.message.ProvisionResultMessage; // ⭐ 추가
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.http.MediaType;
-
-
 
 @Slf4j
 @Service
@@ -147,4 +145,5 @@ public class ProvisionSseService {
             emitterMap.remove(jobId);
         }
     }
+
 }

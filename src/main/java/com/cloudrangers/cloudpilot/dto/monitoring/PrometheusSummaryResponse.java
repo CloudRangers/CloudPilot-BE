@@ -1,29 +1,18 @@
 package com.cloudrangers.cloudpilot.dto.monitoring;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 /**
- * FE vm-status 대시보드에서 쓸 Prometheus 요약 정보
+ * FE Prometheus 모니터링에서 사용하는 up() 요약 DTO
  */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class PrometheusSummaryResponse {
 
     private int totalTargets;
     private int upTargets;
     private int downTargets;
-
-    public PrometheusSummaryResponse(int totalTargets, int upTargets, int downTargets) {
-        this.totalTargets = totalTargets;
-        this.upTargets = upTargets;
-        this.downTargets = downTargets;
-    }
-
-    public int getTotalTargets() {
-        return totalTargets;
-    }
-
-    public int getUpTargets() {
-        return upTargets;
-    }
-
-    public int getDownTargets() {
-        return downTargets;
-    }
 }

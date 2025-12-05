@@ -11,6 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
+
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
@@ -85,12 +86,14 @@ public class VmQueryService {
         return getVms(page, size, providerType, zoneId, status, powerState, name, ownerUserId, teamId,
                 null, null, Collections.emptyMap(), null);
     }
+
     public VmDetailResponse getVmDetail(Long vmId) {
         var vm = vmInstanceRepository.findById(vmId)
                 .orElseThrow(() -> new IllegalArgumentException("VM not found: " + vmId));
         // Also fetch osImage for detail if needed, or join in repository
         return VmDetailResponse.fromEntity(vm);
     }
+
     @Transactional
     public void requestDelete(Long vmId) {
         var vm = vmInstanceRepository.findById(vmId)
@@ -98,4 +101,22 @@ public class VmQueryService {
         vm.setLifecycle("deleting");
     }
 
+    /**
+     * ⭐ VM 이름 중복 체크
+     * - lifecycle = "running" 인 VM을 기준으로 중복 여부 확인
+     * - teamId가 있으면 해당 팀 내에서만 체크, 없으면 전체에서 체크
+     */
+    public boolean isVmNameDuplicate(String name, Long teamId) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+
+        String lifecycle = "running";
+
+        if (teamId != null) {
+            return vmInstanceRepository.existsByNameAndTeamIdAndLifecycle(name, teamId, lifecycle);
+        }
+
+        return vmInstanceRepository.existsByNameAndLifecycle(name, lifecycle);
+    }
 }
