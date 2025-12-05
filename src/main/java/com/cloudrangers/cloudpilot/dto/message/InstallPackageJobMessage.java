@@ -15,8 +15,7 @@ public class InstallPackageJobMessage {
     private Long vmId;
     private String hostname;
 
-    // ❌ removed: NIC 제거 설계에서는 VM이 IP를 갖지 않음
-    // private String ip;
+    private String ip;
 
     private Long ansRunId;
     private long requestedAt;

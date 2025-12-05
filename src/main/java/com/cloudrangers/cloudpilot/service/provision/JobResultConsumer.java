@@ -263,10 +263,10 @@ public class JobResultConsumer {
             return;
         }
 
-        // ⭐⭐⭐ Terraform apply 완료 vs 전체 완료 구분
+
         if (step.contains("terraform") || step.contains("apply")) {
             // Terraform만 완료 → Ansible 대기
-            log.info("✅ Terraform apply completed, waiting for Ansible...");
+            log.info("Terraform apply completed, waiting for Ansible...");
 
             // status는 running 유지 (아직 완료 아님)
             job.setStatus(VmProvisionStatus.running);
@@ -282,7 +282,7 @@ public class JobResultConsumer {
             ProvisionProgressMessage progressMsg = ProvisionProgressMessage.builder()
                     .jobId(String.valueOf(job.getId()))
                     .stage("TERRAFORM_COMPLETE")
-                    .description("✅ VM 생성 완료 - 패키지 설치 준비 중...")
+                    .description("VM 생성 완료 - 패키지 설치 준비 중...")
                     .progress(80)
                     .vmIpAddress(extractVmIpAddress(result))
                     .status("RUNNING")
@@ -293,7 +293,7 @@ public class JobResultConsumer {
 
         } else {
             // (이 경우는 혹시 Worker 쪽에서 SUCCESS 로 Ansible 완료를 보내는 경우 대비)
-            log.info("✅ All provisioning completed (final step: {})", step);
+            log.info("All provisioning completed (final step: {})", step);
 
             job.setStatus(VmProvisionStatus.succeeded);
             if (result.getTimestamp() != null) {
@@ -368,7 +368,7 @@ public class JobResultConsumer {
             ProvisionProgressMessage message = ProvisionProgressMessage.builder()
                     .jobId(String.valueOf(job.getId()))
                     .stage("COMPLETE")
-                    .description("✅ VM 생성 및 설정 완료!")
+                    .description("VM 생성 및 설정 완료!")
                     .progress(100)
                     .vmIpAddress(vmIp)
                     .status("SUCCEEDED")
@@ -391,27 +391,27 @@ public class JobResultConsumer {
 
         if (step.contains("init") || message.contains("Initializing")) {
             info.stage = "TERRAFORM_INIT";
-            info.description = "🔧 Terraform 초기화 중";
+            info.description = "Terraform 초기화 중";
             info.progress = 5;
 
             if (message.contains("successfully initialized")) {
                 info.progress = 10;
-                info.description = "✅ 초기화 완료";
+                info.description = "초기화 완료";
             }
         }
         else if (step.contains("validate") || message.contains("valid")) {
             info.stage = "TERRAFORM_VALIDATE";
-            info.description = "✅ 구성 검증 중";
+            info.description = "구성 검증 중";
             info.progress = 15;
         }
         else if (step.contains("plan") || message.contains("Plan:")) {
             info.stage = "TERRAFORM_PLAN";
-            info.description = "📋 실행 계획 수립 중";
+            info.description = "실행 계획 수립 중";
             info.progress = 20;
 
             if (message.contains("Plan:")) {
                 info.progress = 25;
-                info.description = "✅ 계획 수립 완료";
+                info.description = "계획 수립 완료";
             }
         }
         else if (step.contains("apply") || message.contains("Creating") || message.contains("Still creating")) {
@@ -419,7 +419,7 @@ public class JobResultConsumer {
 
             if (message.contains("Creating...") || message.contains("Creating (")) {
                 info.progress = 30;
-                info.description = "🚀 VM 생성 시작";
+                info.description = "VM 생성 시작";
             }
             else if (message.contains("Still creating")) {
                 int elapsed = parseElapsedSeconds(message);
@@ -441,41 +441,41 @@ public class JobResultConsumer {
             }
             else if (message.contains("Creation complete") || message.contains("VM Created")) {
                 info.progress = 75;
-                info.description = "✅ VM 생성 완료";
+                info.description = "VM 생성 완료";
             }
             else if (message.contains("Apply complete")) {
                 info.progress = 80;
-                info.description = "✅ Terraform 작업 완료";
+                info.description = "Terraform 작업 완료";
             }
         }
         else if (message.contains("PLAY [")) {
             info.stage = "ANSIBLE_START";
-            info.description = "⚙️ 설정 시작";
+            info.description = "⚙설정 시작";
             info.progress = 82;
         }
         else if (message.contains("TASK [Wait for SSH]")) {
             info.stage = "ANSIBLE_SSH";
-            info.description = "🔌 SSH 연결 대기 중";
+            info.description = "SSH 연결 대기 중";
             info.progress = 85;
         }
         else if (message.contains("TASK [common :")) {
             info.stage = "ANSIBLE_COMMON";
-            info.description = "📦 기본 패키지 설치 중";
+            info.description = "기본 패키지 설치 중";
             info.progress = 88;
         }
         else if (message.contains("TASK [node_exporter :")) {
             info.stage = "ANSIBLE_NODE_EXPORTER";
-            info.description = "📊 모니터링 설치 중";
+            info.description = "모니터링 설치 중";
             info.progress = 92;
         }
         else if (message.contains("TASK [monitoring_server :")) {
             info.stage = "ANSIBLE_MONITORING";
-            info.description = "🎯 모니터링 등록 중";
+            info.description = "모니터링 등록 중";
             info.progress = 97;
         }
         else if (message.contains("PLAY RECAP")) {
             info.stage = "ANSIBLE_COMPLETE";
-            info.description = "✅ Ansible 설정 완료";
+            info.description = "Ansible 설정 완료";
             info.progress = 99;
         }
 
@@ -494,7 +494,7 @@ public class JobResultConsumer {
             int minutes = Integer.parseInt(matcher1.group(1));
             int seconds = Integer.parseInt(matcher1.group(2));
             int total = minutes * 60 + seconds;
-            log.debug("⏱️ Parsed elapsed time: {}m {}s = {}s total", minutes, seconds, total);
+            log.debug("Parsed elapsed time: {}m {}s = {}s total", minutes, seconds, total);
             return total;
         }
 
@@ -506,11 +506,11 @@ public class JobResultConsumer {
             int minutes = Integer.parseInt(matcher2.group(1));
             int seconds = Integer.parseInt(matcher2.group(2));
             int total = minutes * 60 + seconds;
-            log.debug("⏱️ Parsed elapsed time: {}m {}s = {}s total", minutes, seconds, total);
+            log.debug("Parsed elapsed time: {}m {}s = {}s total", minutes, seconds, total);
             return total;
         }
 
-        log.debug("⚠️ Could not parse elapsed time from: {}", message);
+        log.debug("Could not parse elapsed time from: {}", message);
         return 0;
     }
 
@@ -531,7 +531,6 @@ public class JobResultConsumer {
                 return matcher1.group(1);
             }
 
-            // ⭐ 2) Ansible 완료 로그: "Ansible provisioning completed for IP: 172.16.5.108"
             Pattern pattern2 = Pattern.compile("IP[:=]\\s*([0-9.]+)");
             Matcher matcher2 = pattern2.matcher(message);
             if (matcher2.find()) {
@@ -563,13 +562,13 @@ public class JobResultConsumer {
         log.info("========================================");
 
         if (tfRunId == null) {
-            log.warn("⚠️ tfRunId is NULL - SKIPPING tf_run update");
+            log.warn("tfRunId is NULL - SKIPPING tf_run update");
             return;
         }
 
         Optional<TfRun> optional = tfRunRepository.findById(tfRunId);
         if (optional.isEmpty()) {
-            log.warn("⚠️ tf_run NOT FOUND for tfRunId={}", tfRunId);
+            log.warn("tf_run NOT FOUND for tfRunId={}", tfRunId);
             return;
         }
 
@@ -591,12 +590,12 @@ public class JobResultConsumer {
                     tfRun.setStateUri(result.getStateUri());
                     changed = true;
                 } else {
-                    log.warn("  ⚠️ stateUri is NULL or BLANK in result");
+                    log.warn("stateUri is NULL or BLANK in result");
                 }
 
                 if (step.toLowerCase(Locale.ROOT).contains("apply")
                         || step.toLowerCase(Locale.ROOT).contains("destroy")) {
-                    log.info("  ✓ Setting status to SUCCEEDED");
+                    log.info("Setting status to SUCCEEDED");
                     tfRun.setStatus(TfRunStatus.succeeded);
                     tfRun.setFinishedAt(result.getTimestamp() != null
                             ? result.getTimestamp().toInstant()
@@ -624,12 +623,12 @@ public class JobResultConsumer {
         }
 
         if (changed) {
-            log.info("💾 Saving tf_run: id={}, newStateUri={}, status={}",
+            log.info("Saving tf_run: id={}, newStateUri={}, status={}",
                     tfRun.getId(), tfRun.getStateUri(), tfRun.getStatus());
             tfRunRepository.save(tfRun);
-            log.info("✅ tf_run saved successfully");
+            log.info("tf_run saved successfully");
         } else {
-            log.warn("⚠️ No changes to save for tf_run: {}", tfRun.getId());
+            log.warn("No changes to save for tf_run: {}", tfRun.getId());
         }
     }
 
@@ -640,7 +639,7 @@ public class JobResultConsumer {
             List<VmProvisionItem> items = vmProvisionItemRepository.findAll();
             for (VmProvisionItem item : items) {
                 if (item.getTfRunId() != null) {
-                    log.info("✓ Found tfRunId via VmProvisionItem: itemId={}, tfRunId={}",
+                    log.info("Found tfRunId via VmProvisionItem: itemId={}, tfRunId={}",
                             item.getId(), item.getTfRunId());
                     return item.getTfRunId();
                 }
@@ -657,11 +656,11 @@ public class JobResultConsumer {
                 }
             }
 
-            log.warn("⚠️ Could not lookup tfRunId from database for jobId={}", jobId);
+            log.warn("Could not lookup tfRunId from database for jobId={}", jobId);
             return null;
 
         } catch (Exception e) {
-            log.error("❌ Failed to lookup tfRunId from database: jobId={}", jobId, e);
+            log.error("Failed to lookup tfRunId from database: jobId={}", jobId, e);
             return null;
         }
     }
@@ -694,12 +693,12 @@ public class JobResultConsumer {
 
             if (vmId != null) {
                 vmDeleteService.markAsDeleted(vmId);
-                log.info("✅ VM deletion succeeded: jobId={}, vmId={}", job.getId(), vmId);
+                log.info("VM deletion succeeded: jobId={}, vmId={}", job.getId(), vmId);
             } else {
-                log.warn("⚠️ Cannot extract vmId from destroy success: jobId={}", job.getId());
+                log.warn("Cannot extract vmId from destroy success: jobId={}", job.getId());
             }
         } catch (Exception e) {
-            log.error("❌ Failed to mark VM as deleted: jobId={}", job.getId(), e);
+            log.error("Failed to mark VM as deleted: jobId={}", job.getId(), e);
         }
     }
 
@@ -711,13 +710,13 @@ public class JobResultConsumer {
 
             if (vmId != null) {
                 vmDeleteService.markDeletionFailed(vmId, errorMessage);
-                log.error("❌ VM deletion failed: jobId={}, vmId={}, error={}",
+                log.error("VM deletion failed: jobId={}, vmId={}, error={}",
                         job.getId(), vmId, errorMessage);
             } else {
-                log.warn("⚠️ Cannot extract vmId from destroy error: jobId={}", job.getId());
+                log.warn("Cannot extract vmId from destroy error: jobId={}", job.getId());
             }
         } catch (Exception e) {
-            log.error("❌ Failed to handle deletion error: jobId={}", job.getId(), e);
+            log.error("Failed to handle deletion error: jobId={}", job.getId(), e);
         }
     }
 

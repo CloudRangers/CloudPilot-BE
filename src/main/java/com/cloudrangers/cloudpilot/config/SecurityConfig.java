@@ -70,6 +70,8 @@ public class SecurityConfig {
                         // ⭐🔥 SSE는 인증 제외 → 반드시 추가
                         .requestMatchers("/sse/**").permitAll()
 
+                        .requestMatchers("/n8n/**").permitAll()
+
                         // ⭐ 설치 요청은 로그인 필요!
                         .requestMatchers(HttpMethod.POST, "/packages/install").authenticated()
 
@@ -107,6 +109,7 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         source.registerCorsConfiguration("/sse/**", config);
+        source.registerCorsConfiguration("/n8n/**", config);
         return source;
     }
 
