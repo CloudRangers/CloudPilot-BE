@@ -1,6 +1,6 @@
 package com.cloudrangers.cloudpilot.ops.service;
 
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusClient;
+import com.cloudrangers.cloudpilot.service.PrometheusClient;
 import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
 import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
 import com.cloudrangers.cloudpilot.ops.dto.*;
