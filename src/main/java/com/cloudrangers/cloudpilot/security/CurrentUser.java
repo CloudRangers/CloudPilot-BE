@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.ops.security;
+package com.cloudrangers.cloudpilot.security;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

@@ -1,9 +1,11 @@
-package com.cloudrangers.cloudpilot.ops.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.service.PrometheusClient;
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
-import com.cloudrangers.cloudpilot.ops.dto.*;
+import com.cloudrangers.cloudpilot.enums.MetricAggregation;
+import com.cloudrangers.cloudpilot.enums.RechartsDataResponse;
+import com.cloudrangers.cloudpilot.enums.TimeSeriesPoint;
+import com.cloudrangers.cloudpilot.enums.VmMetricResponse;
+import com.cloudrangers.cloudpilot.domain.MetricTarget;
+import com.cloudrangers.cloudpilot.repository.MetricTargetRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

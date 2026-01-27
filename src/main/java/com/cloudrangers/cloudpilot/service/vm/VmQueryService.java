@@ -4,7 +4,7 @@ import com.cloudrangers.cloudpilot.domain.catalog.OsImage;
 import com.cloudrangers.cloudpilot.dto.request.VmSearchCondition;
 import com.cloudrangers.cloudpilot.dto.response.VmStatusResponse;
 import com.cloudrangers.cloudpilot.dto.response.VmDetailResponse;
-import com.cloudrangers.cloudpilot.repository.catalog.OsImageRepository; // Added this import
+import com.cloudrangers.cloudpilot.repository.catalog.OsImageRepository;
 import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -24,7 +23,7 @@ import java.util.stream.Collectors;
 public class VmQueryService {
 
     private final VmInstanceRepository vmInstanceRepository;
-    private final OsImageRepository osImageRepository; // Added this
+    private final OsImageRepository osImageRepository;
 
     public PageResponse<VmStatusResponse> getVms(
             int page,
@@ -75,16 +74,6 @@ public class VmQueryService {
                 .collect(Collectors.toList());
 
         return PageResponse.of(items, pageResult.getNumber(), pageResult.getSize(), pageResult.getTotalElements());
-    }
-
-    // 호환용 (컨트롤러 이전 버전 호출 시)
-    public PageResponse<VmStatusResponse> getVms(
-            int page, int size, String providerType, Long zoneId,
-            String status, String powerState, String name,
-            Long ownerUserId, Long teamId
-    ) {
-        return getVms(page, size, providerType, zoneId, status, powerState, name, ownerUserId, teamId,
-                null, null, Collections.emptyMap(), null);
     }
 
     public VmDetailResponse getVmDetail(Long vmId) {

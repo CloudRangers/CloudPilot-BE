@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.infra.vcenter;
+package com.cloudrangers.cloudpilot.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

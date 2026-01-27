@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.common.exception;
+package com.cloudrangers.cloudpilot.exception;
 
 import lombok.Getter;
 import org.springframework.http.HttpStatus;

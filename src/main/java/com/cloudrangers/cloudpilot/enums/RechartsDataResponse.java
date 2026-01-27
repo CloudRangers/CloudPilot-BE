@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.ops.dto;
+package com.cloudrangers.cloudpilot.enums;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

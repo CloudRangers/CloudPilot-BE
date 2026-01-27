@@ -12,8 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
+import com.cloudrangers.cloudpilot.repository.MetricTargetRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;

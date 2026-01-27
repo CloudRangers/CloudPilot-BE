@@ -1,10 +1,10 @@
 // src/main/java/com/cloudrangers/cloudpilot/monitor/prometheus/service/PrometheusMetricsService.java
-package com.cloudrangers.cloudpilot.monitor.prometheus.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.DatastoreUsageDto;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTarget;
-import com.cloudrangers.cloudpilot.ops.domain.metric.MetricTargetRepository;
+import com.cloudrangers.cloudpilot.dto.DatastoreUsageDto;
+import com.cloudrangers.cloudpilot.dto.VmMetricSummaryDto;
+import com.cloudrangers.cloudpilot.domain.MetricTarget;
+import com.cloudrangers.cloudpilot.repository.MetricTargetRepository;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
 import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import com.fasterxml.jackson.databind.JsonNode;

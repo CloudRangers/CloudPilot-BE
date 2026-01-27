@@ -1,6 +1,6 @@
-package com.cloudrangers.cloudpilot.monitor.vcenter.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.monitor.vcenter.config.VcenterProperties;
+import com.cloudrangers.cloudpilot.config.VcenterProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;

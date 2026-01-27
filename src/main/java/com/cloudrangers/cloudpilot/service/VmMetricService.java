@@ -1,8 +1,8 @@
-package com.cloudrangers.cloudpilot.ops.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.ops.dto.MetricAggregation;
-import com.cloudrangers.cloudpilot.ops.dto.RechartsDataResponse;
-import com.cloudrangers.cloudpilot.ops.dto.VmMetricResponse;
+import com.cloudrangers.cloudpilot.enums.MetricAggregation;
+import com.cloudrangers.cloudpilot.enums.RechartsDataResponse;
+import com.cloudrangers.cloudpilot.enums.VmMetricResponse;
 
 public interface VmMetricService {
 

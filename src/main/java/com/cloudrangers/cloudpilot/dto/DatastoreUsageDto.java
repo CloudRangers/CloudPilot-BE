@@ -1,5 +1,5 @@
 // DatastoreUsageDto.java
-package com.cloudrangers.cloudpilot.monitor.prometheus.dto;
+package com.cloudrangers.cloudpilot.dto;
 
 import lombok.Builder;
 import lombok.Getter;

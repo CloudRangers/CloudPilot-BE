@@ -1,8 +1,6 @@
-package com.cloudrangers.cloudpilot.ops.config;
+package com.cloudrangers.cloudpilot.config;
 
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.client.RestTemplate;
 
 @Configuration
 public class MonitoringConfig {

@@ -1,12 +1,12 @@
-package com.cloudrangers.cloudpilot.monitor.vcenter.controller;
+package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.dto.monitor.VCenterVmResponse;
 import com.cloudrangers.cloudpilot.domain.vm.VmInstance;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusMetricsService;
-import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterSummaryResponse;
-import com.cloudrangers.cloudpilot.monitor.vcenter.service.VcenterMonitorService;
+import com.cloudrangers.cloudpilot.dto.VmMetricSummaryDto;
+import com.cloudrangers.cloudpilot.service.PrometheusMetricsService;
+import com.cloudrangers.cloudpilot.dto.VcenterSummaryResponse;
+import com.cloudrangers.cloudpilot.service.VcenterMonitorService;
 import com.cloudrangers.cloudpilot.repository.vm.VmInstanceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;

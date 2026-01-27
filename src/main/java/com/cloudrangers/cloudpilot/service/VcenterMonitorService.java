@@ -1,7 +1,7 @@
-package com.cloudrangers.cloudpilot.monitor.vcenter.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterSummaryResponse;
-import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterVmInfoDto;
+import com.cloudrangers.cloudpilot.dto.VcenterSummaryResponse;
+import com.cloudrangers.cloudpilot.dto.VcenterVmInfoDto;
 
 import java.util.List;
 import java.util.Map;

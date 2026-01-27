@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.monitor.admin.controller;
+package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.dto.monitoring.AdminOverviewDto;

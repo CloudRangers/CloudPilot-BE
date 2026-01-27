@@ -1,12 +1,12 @@
-package com.cloudrangers.cloudpilot.monitor.prometheus.controller;
+package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.HostResourceChartResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmMetricSummaryDto;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmResourceChartResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.HostResourceMetricsService;
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusMetricsService;
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.VmResourceMetricsService;
+import com.cloudrangers.cloudpilot.dto.HostResourceChartResponse;
+import com.cloudrangers.cloudpilot.dto.VmMetricSummaryDto;
+import com.cloudrangers.cloudpilot.dto.VmResourceChartResponse;
+import com.cloudrangers.cloudpilot.service.HostResourceMetricsService;
+import com.cloudrangers.cloudpilot.service.PrometheusMetricsService;
+import com.cloudrangers.cloudpilot.service.VmResourceMetricsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;

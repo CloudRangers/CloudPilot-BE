@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.common.exception;
+package com.cloudrangers.cloudpilot.exception;
 
 public class CatalogConflictException extends RuntimeException {
     private final String errorCode;

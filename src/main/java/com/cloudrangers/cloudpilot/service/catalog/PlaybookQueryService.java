@@ -1,7 +1,6 @@
 package com.cloudrangers.cloudpilot.service.catalog;
 
-import com.cloudrangers.cloudpilot.common.ApiResponse;
-import com.cloudrangers.cloudpilot.common.exception.CatalogNotFoundException;
+import com.cloudrangers.cloudpilot.exception.CatalogNotFoundException;
 import com.cloudrangers.cloudpilot.domain.catalog.Playbook;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 import com.cloudrangers.cloudpilot.dto.response.PlaybookResponse;
@@ -11,8 +10,6 @@ import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
-import jakarta.persistence.criteria.Predicate;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service

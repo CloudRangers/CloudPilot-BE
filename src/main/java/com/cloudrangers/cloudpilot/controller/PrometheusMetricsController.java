@@ -1,9 +1,9 @@
 // src/main/java/com/cloudrangers/cloudpilot/monitor/prometheus/web/PrometheusMetricsController.java
-package com.cloudrangers.cloudpilot.monitor.prometheus.web;
+package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.DatastoreUsageDto;
-import com.cloudrangers.cloudpilot.monitor.prometheus.service.PrometheusMetricsService;
+import com.cloudrangers.cloudpilot.dto.DatastoreUsageDto;
+import com.cloudrangers.cloudpilot.service.PrometheusMetricsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;

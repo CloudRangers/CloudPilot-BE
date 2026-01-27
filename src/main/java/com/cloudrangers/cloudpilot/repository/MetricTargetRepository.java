@@ -1,5 +1,6 @@
-package com.cloudrangers.cloudpilot.ops.domain.metric;
+package com.cloudrangers.cloudpilot.repository;
 
+import com.cloudrangers.cloudpilot.domain.MetricTarget;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

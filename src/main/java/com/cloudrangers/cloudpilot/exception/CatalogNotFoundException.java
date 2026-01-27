@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.common.exception;
+package com.cloudrangers.cloudpilot.exception;
 
 public class CatalogNotFoundException extends RuntimeException {
     private final String errorCode;

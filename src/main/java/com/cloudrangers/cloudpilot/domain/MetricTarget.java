@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.ops.domain.metric;
+package com.cloudrangers.cloudpilot.domain;
 
 import jakarta.persistence.*;
 import lombok.*;

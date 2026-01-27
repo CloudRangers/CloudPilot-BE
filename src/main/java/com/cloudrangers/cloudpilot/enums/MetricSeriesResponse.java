@@ -1,10 +1,8 @@
-package com.cloudrangers.cloudpilot.ops.dto;
+package com.cloudrangers.cloudpilot.enums;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-
-import java.util.List;
 
 @Getter
 @NoArgsConstructor

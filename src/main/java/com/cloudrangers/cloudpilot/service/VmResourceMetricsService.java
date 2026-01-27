@@ -1,8 +1,8 @@
-package com.cloudrangers.cloudpilot.monitor.prometheus.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.monitor.prometheus.config.PrometheusProperties;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.VmResourceChartResponse;
-import com.cloudrangers.cloudpilot.ops.dto.TimeSeriesPoint;
+import com.cloudrangers.cloudpilot.config.PrometheusProperties;
+import com.cloudrangers.cloudpilot.dto.VmResourceChartResponse;
+import com.cloudrangers.cloudpilot.enums.TimeSeriesPoint;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

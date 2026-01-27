@@ -1,10 +1,10 @@
-package com.cloudrangers.cloudpilot.ops.controller;
+package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
-import com.cloudrangers.cloudpilot.ops.dto.MetricAggregation;
-import com.cloudrangers.cloudpilot.ops.dto.RechartsDataResponse;
-import com.cloudrangers.cloudpilot.ops.dto.VmMetricResponse;
-import com.cloudrangers.cloudpilot.ops.service.VmMetricService;
+import com.cloudrangers.cloudpilot.enums.MetricAggregation;
+import com.cloudrangers.cloudpilot.enums.RechartsDataResponse;
+import com.cloudrangers.cloudpilot.enums.VmMetricResponse;
+import com.cloudrangers.cloudpilot.service.VmMetricService;
 import com.cloudrangers.cloudpilot.security.AuthUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
@@ -114,14 +114,6 @@ public class VmMetricController {
      */
     private void checkAccess(String vmId) {
         String role = AuthUtil.getRole();
-        Long teamId = AuthUtil.getTeamId();
-        Long userId = AuthUtil.getUserId();
-
-        // 🔥 디버깅용: 권한 완전 오픈
-        // 나중에 다시 롤 체크 넣으면 됨
-        if (true) {
-            return;
-        }
 
         if (role == null) {
             throw new AccessDeniedException("인증되지 않은 사용자입니다.");

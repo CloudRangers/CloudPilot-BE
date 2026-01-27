@@ -1,17 +1,14 @@
-package com.cloudrangers.cloudpilot.monitor.prometheus.service;
+package com.cloudrangers.cloudpilot.service;
 
-import com.cloudrangers.cloudpilot.monitor.prometheus.config.PrometheusProperties;
-import com.cloudrangers.cloudpilot.ops.dto.TimeSeriesPoint;
+import com.cloudrangers.cloudpilot.config.PrometheusProperties;
+import com.cloudrangers.cloudpilot.enums.TimeSeriesPoint;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
-import org.springframework.web.util.UriUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

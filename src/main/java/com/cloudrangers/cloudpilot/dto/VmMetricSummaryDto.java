@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.monitor.prometheus.dto;
+package com.cloudrangers.cloudpilot.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

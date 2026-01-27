@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.monitor.prometheus.config;
+package com.cloudrangers.cloudpilot.config;
 
 import lombok.Getter;
 import lombok.Setter;

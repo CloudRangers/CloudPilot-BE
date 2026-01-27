@@ -1,4 +1,4 @@
-package com.cloudrangers.cloudpilot.common.exception;
+package com.cloudrangers.cloudpilot.exception;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import org.springframework.http.ResponseEntity;
