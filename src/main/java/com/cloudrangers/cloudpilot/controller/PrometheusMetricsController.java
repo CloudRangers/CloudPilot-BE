@@ -1,4 +1,3 @@
-// src/main/java/com/cloudrangers/cloudpilot/monitor/prometheus/web/PrometheusMetricsController.java
 package com.cloudrangers.cloudpilot.controller;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;

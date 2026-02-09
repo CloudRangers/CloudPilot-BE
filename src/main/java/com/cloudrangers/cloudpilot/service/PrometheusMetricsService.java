@@ -1,4 +1,3 @@
-// src/main/java/com/cloudrangers/cloudpilot/monitor/prometheus/service/PrometheusMetricsService.java
 package com.cloudrangers.cloudpilot.service;
 
 import com.cloudrangers.cloudpilot.dto.DatastoreUsageDto;
