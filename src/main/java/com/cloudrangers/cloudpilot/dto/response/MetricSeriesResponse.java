@@ -1,5 +1,6 @@
-package com.cloudrangers.cloudpilot.enums;
+package com.cloudrangers.cloudpilot.dto.response;
 
+import com.cloudrangers.cloudpilot.enums.TimeSeriesPoint;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
