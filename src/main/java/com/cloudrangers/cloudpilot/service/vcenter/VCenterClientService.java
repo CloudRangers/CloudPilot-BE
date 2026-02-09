@@ -1,7 +1,7 @@
 package com.cloudrangers.cloudpilot.service.vcenter;
 
 import com.cloudrangers.cloudpilot.dto.vcenter.VCenterSummaryResponse;
-import com.cloudrangers.cloudpilot.infra.vcenter.VCenterClient;
+import com.cloudrangers.cloudpilot.service.VCenterClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

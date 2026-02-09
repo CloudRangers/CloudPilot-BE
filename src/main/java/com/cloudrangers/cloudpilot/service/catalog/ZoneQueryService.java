@@ -1,7 +1,7 @@
 // src/main/java/com/cloudrangers/cloudpilot/service/catalog/ZoneQueryService.java
 package com.cloudrangers.cloudpilot.service.catalog;
 
-import com.cloudrangers.cloudpilot.common.exception.CatalogNotFoundException;
+import com.cloudrangers.cloudpilot.exception.CatalogNotFoundException;
 import com.cloudrangers.cloudpilot.dto.response.ZoneResponse;
 import com.cloudrangers.cloudpilot.domain.catalog.Zone;
 import com.cloudrangers.cloudpilot.repository.catalog.ZoneRepository;

@@ -2,8 +2,8 @@ package com.cloudrangers.cloudpilot.service.monitoring;
 
 import com.cloudrangers.cloudpilot.dto.monitoring.PrometheusQueryResponse;
 import com.cloudrangers.cloudpilot.dto.monitoring.PrometheusSummaryResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.DatastoreUsageDto;
-import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterSummaryResponse;
+import com.cloudrangers.cloudpilot.dto.DatastoreUsageDto;
+import com.cloudrangers.cloudpilot.dto.VcenterSummaryResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -176,14 +176,6 @@ public class PrometheusMonitoringService {
 
         return result;
     }
-
-    /*
-    // 🔸 (참고용) 기존 버전
-    public int queryIntValue(String promQl) {
-        Double v = querySingleValue(promQl);
-        return (v != null) ? v.intValue() : 0;
-    }
-    */
 
     // =========================================================
     // 🔹 3) vCenter VM 요약 (SummaryCards용)

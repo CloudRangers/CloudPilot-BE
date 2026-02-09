@@ -1,7 +1,7 @@
 package com.cloudrangers.cloudpilot.service.catalog;
 
-import com.cloudrangers.cloudpilot.common.exception.CatalogConflictException;
-import com.cloudrangers.cloudpilot.common.exception.CatalogNotFoundException;
+import com.cloudrangers.cloudpilot.exception.CatalogConflictException;
+import com.cloudrangers.cloudpilot.exception.CatalogNotFoundException;
 import com.cloudrangers.cloudpilot.domain.catalog.Datastore;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 import com.cloudrangers.cloudpilot.dto.response.DatastoreResponse;

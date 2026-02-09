@@ -3,8 +3,8 @@ package com.cloudrangers.cloudpilot.controller.monitoring;
 
 import com.cloudrangers.cloudpilot.common.ApiResponse;
 import com.cloudrangers.cloudpilot.dto.monitoring.PrometheusSummaryResponse;
-import com.cloudrangers.cloudpilot.monitor.prometheus.dto.DatastoreUsageDto;
-import com.cloudrangers.cloudpilot.monitor.vcenter.dto.VcenterSummaryResponse;
+import com.cloudrangers.cloudpilot.dto.DatastoreUsageDto;
+import com.cloudrangers.cloudpilot.dto.VcenterSummaryResponse;
 import com.cloudrangers.cloudpilot.service.monitoring.PrometheusMonitoringService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

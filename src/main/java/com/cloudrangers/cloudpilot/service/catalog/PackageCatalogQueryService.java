@@ -1,6 +1,6 @@
 package com.cloudrangers.cloudpilot.service.catalog;
 
-import com.cloudrangers.cloudpilot.common.exception.CatalogNotFoundException;
+import com.cloudrangers.cloudpilot.exception.CatalogNotFoundException;
 import com.cloudrangers.cloudpilot.domain.catalog.PackageCatalog;
 import com.cloudrangers.cloudpilot.dto.common.PageResponse;
 import com.cloudrangers.cloudpilot.dto.response.PackageResponse;
